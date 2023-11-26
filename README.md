@@ -27,6 +27,7 @@ Even if less safe, the faster way is to download and run the scripts in the same
 - `wget -q -O - https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/install_nvm.sh | sudo bash`
 - `wget -q -O - https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/install_wp_cli.sh | sudo bash`
 - `wget -q -O - https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/install_wp.sh | sudo bash`
+- `wget -q -O - https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/enable_php_extension.sh | sudo bash`
 
 You can also have shorthands for creating the system wide available commands:
 
@@ -35,3 +36,4 @@ You can also have shorthands for creating the system wide available commands:
 - `sudo wget -O /usr/local/bin/install_nvm https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/install_nvm.sh && sudo chmod +x /usr/local/bin/install_nvm`
 - `sudo wget -O /usr/local/bin/install_wp_cli https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/install_wp_cli.sh && sudo chmod +x /usr/local/bin/install_wp_cli`
 - `sudo wget -O /usr/local/bin/install_wp https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/install_wp.sh && sudo chmod +x /usr/local/bin/install_wp`
+- `sudo wget -O /usr/local/bin/enable_php_extension https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master/enable_php_extension.sh && sudo chmod +x /usr/local/bin/enable_php_extension`
