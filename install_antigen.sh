@@ -5,14 +5,14 @@
 # Check the required utils
 REQUIRED_UTILS=("git" "zsh")
 for UTIL in "${REQUIRED_UTILS[@]}"; do
-    if ! command -v $UTIL &> /dev/null; then
-        echo "The required utility $UTIL is not installed. Please install it and rerun this script."
-        exit
-    fi
+  if ! command -v $UTIL &> /dev/null; then
+    echo "The required utility $UTIL is not installed. Please install it and rerun this script."
+    exit
+  fi
 done
 
 # Check if the script is run by a regular user, not root
-if [ "$EUID" -eq 0 ]; then 
+if [ "$EUID" -eq 0 ]; then
   echo "Please run as a regular user, not as root"
   exit
 fi
@@ -22,8 +22,8 @@ ANTIGEN_PATH="$HOME/.antigen"
 
 # Check if Antigen is already installed
 if [ -d "$ANTIGEN_PATH" ]; then
-    echo "Antigen is already installed for user $(whoami)."
-    exit
+  echo "Antigen is already installed for user $(whoami)."
+  exit
 fi
 
 # Create Antigen directory
@@ -50,9 +50,9 @@ echo "antigen apply"
 
 # Check if current shell is Zsh
 if [[ "$SHELL" == *"/zsh" ]]; then
-    echo "Antigen has been installed and configured for user $(whoami)."
-    echo "Please restart your terminal or run 'source ~/.zshrc' to apply changes."
+  echo "Antigen has been installed and configured for user $(whoami)."
+  echo "Please restart your terminal or run 'source ~/.zshrc' to apply changes."
 else
-    echo "Antigen has been installed for user $(whoami), but the current shell is not Zsh."
-    echo "Please switch to Zsh or change your default shell to Zsh."
+  echo "Antigen has been installed for user $(whoami), but the current shell is not Zsh."
+  echo "Please switch to Zsh or change your default shell to Zsh."
 fi

@@ -3,7 +3,7 @@
 # This script installs Composer locally in the user's home directory
 
 # Check if the script is run by a regular user, not root
-if [ "$EUID" -eq 0 ]; then 
+if [ "$EUID" -eq 0 ]; then
   echo "Please run as a regular user, not as root"
   exit
 fi
@@ -26,9 +26,9 @@ ACTUAL_SIGNATURE="$(php -r "echo hash_file('SHA384', 'composer-setup.php');")"
 
 if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]
 then
-    >&2 echo 'ERROR: Invalid installer signature'
-    rm composer-setup.php
-    exit 1
+  >&2 echo 'ERROR: Invalid installer signature'
+  rm composer-setup.php
+  exit 1
 fi
 
 # Run the installer
@@ -40,20 +40,20 @@ rm composer-setup.php
 
 # Check if installation was successful
 if [ $RESULT -eq 0 ]; then
-    echo "Composer installed successfully in $COMPOSER_BIN"
+  echo "Composer installed successfully in $COMPOSER_BIN"
 else
-    echo "Composer installation failed"
-    exit 1
+  echo "Composer installation failed"
+  exit 1
 fi
 
 # Update PATH in .bashrc if the bin directory is not already in PATH
 if [ -f $HOME/.bashrc ] && ! grep -q "$INSTALL_DIR" $HOME/.bashrc; then
-    echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> $HOME/.bashrc
-    echo "Please log out and log back in or source .bashrc to update PATH."
+  echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> $HOME/.bashrc
+  echo "Please log out and log back in or source .bashrc to update PATH."
 fi
 
 # Update PATH in .zshrc if the bin directory is not already in PATH
 if [ -f $HOME/.zshrc ] && ! grep -q "$INSTALL_DIR" $HOME/.zshrc; then
-    echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> $HOME/.zshrc
-    echo "Please log out and log back in or source .zshrc to update PATH."
+  echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> $HOME/.zshrc
+  echo "Please log out and log back in or source .zshrc to update PATH."
 fi

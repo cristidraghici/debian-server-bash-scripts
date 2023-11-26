@@ -24,13 +24,13 @@ mv wp-cli.phar $WP_CLI_FILE
 
 # Function to update PATH in the specified file
 update_path() {
-    local file=$1
-    if [ -f "$file" ]; then
-        if ! grep -q "$BIN_DIR" "$file"; then
-            echo 'export PATH="$PATH:$HOME/bin"' >> "$file"
-            source "$file"
-        fi
+  local file=$1
+  if [ -f "$file" ]; then
+    if ! grep -q "$BIN_DIR" "$file"; then
+      echo 'export PATH="$PATH:$HOME/bin"' >> "$file"
+      source "$file"
     fi
+  fi
 }
 
 # Update PATH in .zshrc and .bashrc
