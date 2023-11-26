@@ -9,31 +9,35 @@ fi
 # Prompt for the new username
 read -p "Enter the new sudo user's name: " USERNAME
 
+# Check if user already exists
+if id "$USERNAME" &>/dev/null; then
+  echo "Error: User '$USERNAME' already exists." 1>&2
+  exit 1
+fi
+
 # Create a new user and add to sudo group
 adduser --gecos "" $USERNAME
 usermod -aG sudo $USERNAME
 
-# Lock the root account
-passwd -l root
+# Check if the root account is already locked
+ROOT_LOCKED=$(grep '^root:' /etc/shadow | cut -d: -f2)
+if [[ $ROOT_LOCKED == '!'* ]]; then
+  echo "The root account is already locked."
+else
+  passwd -l root
+fi
 
 # Setup SSH key for the new user
 USER_HOME=$(eval echo ~$USERNAME)
 mkdir -p $USER_HOME/.ssh
 touch $USER_HOME/.ssh/authorized_keys
 
-echo "Please paste the public SSH key. To retrieve it from your system, you can use the terminal command: 'cat ~/.ssh/id_rsa.pub'"
-read SSH_KEY
+echo "Please paste the public SSH key, then press Ctrl-D:"
+cat >> $USER_HOME/.ssh/authorized_keys
 
-# Check if the key already exists in the authorized_keys
-if grep -qsF "$SSH_KEY" $USER_HOME/.ssh/authorized_keys; then
-  echo "Key already exists in authorized_keys."
-else
-  echo "$SSH_KEY" >> $USER_HOME/.ssh/authorized_keys
-  # Set permissions
-  chown -R $USERNAME:$USERNAME $USER_HOME/.ssh
-  chmod 700 $USER_HOME/.ssh
-  chmod 600 $USER_HOME/.ssh/authorized_keys
-  echo "SSH key added."
-fi
+# Set permissions
+chown -R $USERNAME:$USERNAME $USER_HOME/.ssh
+chmod 700 $USER_HOME/.ssh
+chmod 600 $USER_HOME/.ssh/authorized_keys
 
 echo "User $USERNAME created and configured."
