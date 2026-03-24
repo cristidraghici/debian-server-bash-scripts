@@ -11,8 +11,19 @@ for UTIL in "${REQUIRED_UTILS[@]}"; do
   fi
 done
 
+# Parse flags
+ALLOW_ROOT=false
+for arg in "$@"; do
+  case "$arg" in
+    --root)
+      ALLOW_ROOT=true
+      shift
+      ;;
+  esac
+done
+
 # Check if the script is run by a regular user, not root
-if [ "$EUID" -eq 0 ]; then
+if [ "$EUID" -eq 0 ] && [ "$ALLOW_ROOT" != true ]; then
   echo "Please run as a regular user, not as root"
   exit
 fi
