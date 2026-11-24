@@ -1,237 +1,502 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Configuration
-DEFAULT_DB_ADDRESS="localhost"
+# Standalone WordPress installer for Debian servers.
+# Downloads WordPress core + unpinned plugins/themes, generates wp-config.php
+# with fresh authentication salts, and protects the defaults file.
+
+ALLOW_ROOT=false
+DB_HOST="localhost"
+DB_NAME=""
+DB_USER=""
+DB_PASS="${WP_DB_PASS:-}"
+DEST_DIR=""
 DEFAULTS_FILE=".wp_install_defaults"
+NO_PLUGINS=false
+ASSUME_YES=false
+DB_CLIENT=""
+TMP_DIR=""
 
-# Load defaults from file if it exists
-if [ -f "$DEFAULTS_FILE" ]; then
-  IFS=';' read -r -a PLUGINS THEMES < "$DEFAULTS_FILE"
-else
-  PLUGINS=(
-    "https://downloads.wordpress.org/plugin/password-protected.2.6.5.1.zip"
-    "https://downloads.wordpress.org/plugin/wordpress-seo.21.5.zip"
-    "https://downloads.wordpress.org/plugin/wp-dashboard-notes.1.0.10.zip"
-    "https://downloads.wordpress.org/plugin/sucuri-scanner.1.8.39.zip"
-    "https://downloads.wordpress.org/plugin/simple-page-ordering.2.6.3.zip"
-    "https://downloads.wordpress.org/plugin/regenerate-thumbnails.3.1.6.zip"
-    "https://downloads.wordpress.org/plugin/litespeed-cache.5.7.0.1.zip"
-    "https://downloads.wordpress.org/plugin/login-recaptcha.1.7.1.zip"
-    "https://downloads.wordpress.org/plugin/limit-login-attempts-reloaded.2.25.26.zip"
-    "https://downloads.wordpress.org/plugin/just-an-admin-button.1.2.0.zip"
-    "https://downloads.wordpress.org/plugin/instant-images.6.1.0.zip"
-    "https://downloads.wordpress.org/plugin/health-check.1.7.0.zip"
-    "https://downloads.wordpress.org/plugin/wpcf7-redirect.3.0.1.zip"
-    "https://downloads.wordpress.org/plugin/contact-form-cfdb7.zip"
-    "https://downloads.wordpress.org/plugin/contact-form-7.5.8.3.zip"
-    "https://downloads.wordpress.org/plugin/child-theme-wizard.1.4.zip"
-  )
-  THEMES=()
-fi
+PLUGINS=()
+THEMES=()
 
-# Color constants
+DEFAULT_PLUGINS=(
+  "password-protected"
+  "wordpress-seo"
+  "wp-dashboard-notes"
+  "sucuri-scanner"
+  "simple-page-ordering"
+  "regenerate-thumbnails"
+  "litespeed-cache"
+  "login-recaptcha"
+  "limit-login-attempts-reloaded"
+  "just-an-admin-button"
+  "instant-images"
+  "health-check"
+  "wpcf7-redirect"
+  "contact-form-cfdb7"
+  "contact-form-7"
+  "child-theme-wizard"
+)
+
 RED="0;31"
 GREEN="0;32"
 YELLOW="0;33"
 BLUE="0;34"
 
-# Function for colored echo messages
+cleanup() {
+  if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
+}
+trap cleanup EXIT
+
+usage() {
+  cat <<'EOF'
+Usage: install_wp.sh [OPTIONS]
+
+Download and configure a standalone WordPress installation with plugins,
+themes, fresh authentication salts, and safe wp-config.php generation.
+
+Options:
+      --root                  Allow running as the root user
+      --db-host <host>        Database host (default: localhost)
+      --db-name <name>        Database name
+      --db-user <user>        Database username (defaults to database name)
+      --db-pass <pass>        Database password (or set WP_DB_PASS env var)
+      --dest <dir>            Destination directory (default: ./wordpress)
+      --defaults-file <path>  Plugin/theme defaults file (default: .wp_install_defaults)
+      --no-plugins            Skip installing plugins
+  -y, --yes                   Skip confirmation prompt
+  -h, --help                  Show this help message and exit
+
+Defaults file format (one entry per line, # comments allowed):
+  plugin:<wordpress-org-slug-or-zip-url>
+  theme:<wordpress-org-slug-or-zip-url>
+
+Examples:
+  ./install_wp.sh
+  WP_DB_PASS='s3cr3t' ./install_wp.sh --db-name wp_site --db-user wp_user --dest /var/www/site -y
+EOF
+}
+
 colored_echo() {
-  local COLOR_CODE="$1"
-  local MESSAGE="$2"
-  local OPTIONS="${@:3}"
-
-  echo -e $OPTIONS "\033[${COLOR_CODE}m${MESSAGE}\033[0m"
+  local color_code="$1"
+  local message="$2"
+  if [[ -t 1 ]]; then
+    printf '\033[%sm%s\033[0m\n' "$color_code" "$message"
+  else
+    printf '%s\n' "$message"
+  fi
 }
 
-# Function to test database credentials
+die() {
+  colored_echo "$RED" "Error: $*" >&2
+  exit 1
+}
+
+prompt_read() {
+  local prompt_text="$1"
+  local var_name="$2"
+  local silent="${3:-false}"
+  local tty_input=""
+
+  if [[ -t 0 ]]; then
+    if [[ "$silent" == true ]]; then
+      read -r -s -p "$prompt_text" tty_input
+      echo
+    else
+      read -r -p "$prompt_text" tty_input
+    fi
+  elif [[ -r /dev/tty ]]; then
+    if [[ "$silent" == true ]]; then
+      read -r -s -p "$prompt_text" tty_input </dev/tty
+      echo
+    else
+      read -r -p "$prompt_text" tty_input </dev/tty
+    fi
+  else
+    die "Non-interactive shell detected. Pass required values via CLI flags (see --help)."
+  fi
+
+  printf -v "$var_name" '%s' "$tty_input"
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --root)
+        ALLOW_ROOT=true
+        shift
+        ;;
+      --db-host)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        DB_HOST="$2"
+        shift 2
+        ;;
+      --db-name)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        DB_NAME="$2"
+        shift 2
+        ;;
+      --db-user)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        DB_USER="$2"
+        shift 2
+        ;;
+      --db-pass)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        DB_PASS="$2"
+        shift 2
+        ;;
+      --dest)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        DEST_DIR="$2"
+        shift 2
+        ;;
+      --defaults-file)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        DEFAULTS_FILE="$2"
+        shift 2
+        ;;
+      --no-plugins)
+        NO_PLUGINS=true
+        shift
+        ;;
+      -y | --yes)
+        ASSUME_YES=true
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown option: $1 (use --help for usage)"
+        ;;
+    esac
+  done
+}
+
+check_dependencies() {
+  local util
+  for util in curl unzip; do
+    if ! command -v "$util" >/dev/null 2>&1; then
+      die "Required utility '$util' is not installed. Please install it and rerun this script."
+    fi
+  done
+
+  if command -v mariadb >/dev/null 2>&1; then
+    DB_CLIENT="mariadb"
+  elif command -v mysql >/dev/null 2>&1; then
+    DB_CLIENT="mysql"
+  else
+    die "Neither 'mariadb' nor 'mysql' client is installed. Please install mariadb-client."
+  fi
+}
+
+load_defaults() {
+  if [[ -f "$DEFAULTS_FILE" ]]; then
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      # Trim leading/trailing whitespace
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      if [[ -z "$line" || "$line" == \#* ]]; then
+        continue
+      fi
+      key="${line%%:*}"
+      value="${line#*:}"
+      case "$key" in
+        plugin)
+          [[ -n "$value" ]] && PLUGINS+=("$value")
+          ;;
+        theme)
+          [[ -n "$value" ]] && THEMES+=("$value")
+          ;;
+        *)
+          colored_echo "$YELLOW" "Warning: Ignoring unrecognized defaults entry: $line"
+          ;;
+      esac
+    done <"$DEFAULTS_FILE"
+  else
+    PLUGINS=("${DEFAULT_PLUGINS[@]}")
+    THEMES=()
+  fi
+}
+
+save_defaults() {
+  local target_file="$1"
+  {
+    echo "# WordPress install defaults (one entry per line)"
+    echo "# Format: plugin:<slug-or-url> or theme:<slug-or-url>"
+    local item
+    for item in "${PLUGINS[@]}"; do
+      printf 'plugin:%s\n' "$item"
+    done
+    for item in "${THEMES[@]}"; do
+      printf 'theme:%s\n' "$item"
+    done
+  } >"$target_file"
+}
+
+resolve_asset_url() {
+  local asset_type="$1"
+  local item="$2"
+  if [[ "$item" =~ ^https?:// ]]; then
+    printf '%s\n' "$item"
+    return 0
+  fi
+  if [[ "$item" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    printf 'https://downloads.wordpress.org/%s/%s.zip\n' "$asset_type" "$item"
+    return 0
+  fi
+  return 1
+}
+
 test_db_credentials() {
-  local DB_NAME="$1"
-  local DB_USER="$2"
-  local DB_PASS="$3"
-  local DB_ADDRESS="$4"
-
-  # Attempt to connect to the database
-  if mysql -h "$DB_ADDRESS" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "quit" 2>/dev/null; then
-    return 0  # Success
-  else
-    return 1  # Failure
-  fi
+  MYSQL_PWD="$DB_PASS" "$DB_CLIENT" \
+    -h "$DB_HOST" \
+    -u "$DB_USER" \
+    "$DB_NAME" \
+    -e "SELECT 1;" >/dev/null 2>&1
 }
 
-# Function to check if a string is a URL
-is_url() {
-  local URL="$1"
-  [[ $URL =~ ^https?:// ]]
-}
-
-# Unified function to download and unzip files
 download_and_unzip() {
-  local URL="$1"
-  local DESTINATION="$2"
-  local FILE_NAME=$(basename "$URL")
+  local url="$1"
+  local destination="$2"
+  local archive_file="$TMP_DIR/download.zip"
 
-  colored_echo $GREEN "Downloading $URL..."
-  if ! wget -q -O "$FILE_NAME" "$URL"; then
-    colored_echo $RED "Failed to download $FILE_NAME. Exiting."
-
-    if [ -f "$FILE_NAME" ]; then
-      rm "$FILE_NAME"
-    fi
-
+  colored_echo "$GREEN" "Downloading $url..."
+  if ! curl -fsSL "$url" -o "$archive_file"; then
+    colored_echo "$RED" "Failed to download $url." >&2
+    rm -f "$archive_file"
     return 1
   fi
 
-  if ! unzip -q "$FILE_NAME" -d "$DESTINATION"; then
-    colored_echo $RED "Failed to unzip $FILE_NAME."
-
-    if [ -f "$FILE_NAME" ]; then
-      rm "$FILE_NAME"
-    fi
-
+  if ! unzip -q -o "$archive_file" -d "$destination"; then
+    colored_echo "$RED" "Failed to unzip archive from $url." >&2
+    rm -f "$archive_file"
     return 1
   fi
 
-  rm "$FILE_NAME"
-
+  rm -f "$archive_file"
   return 0
 }
 
-# Function to create and update wp-config.php
+php_single_quote_escape() {
+  local val="$1"
+  val="${val//\\/\\\\}"
+  val="${val//\'/\\\'}"
+  printf '%s' "$val"
+}
+
+generate_wp_salts() {
+  local salts=""
+  if salts="$(curl -fsSL "https://api.wordpress.org/secret-key/1.1/salt/" 2>/dev/null)" &&
+    [[ "$salts" == *"AUTH_KEY"* && "$salts" == *"NONCE_SALT"* ]]; then
+    printf '%s\n' "$salts"
+    return 0
+  fi
+
+  colored_echo "$YELLOW" "Warning: Could not fetch salts from api.wordpress.org; generating local random salts." >&2
+  local key_name secret
+  for key_name in \
+    AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY \
+    AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+    if command -v openssl >/dev/null 2>&1; then
+      secret="$(openssl rand -base64 48 | tr -d '\n' | tr "'" '_')"
+    else
+      secret="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#%^&*()-_=+[]{}|;:,.<>?' </dev/urandom | head -c 64)"
+    fi
+    printf "define( '%s', '%s' );\n" "$key_name" "$secret"
+  done
+}
+
 create_wp_config() {
-  local DB_NAME="$1"
-  local DB_USER="$2"
-  local DB_PASS="$3"
-  local DB_ADDRESS="$4"
+  local wp_dir="$1"
+  local sample_file="$wp_dir/wp-config-sample.php"
+  local config_file="$wp_dir/wp-config.php"
 
-  local WP_CONFIG_FILE="wordpress/wp-config.php"
-  local WP_SAMPLE_CONFIG_FILE="wordpress/wp-config-sample.php"
+  [[ -f "$sample_file" ]] || die "Expected $sample_file was not found."
 
-  # Copy the sample config file to wp-config.php
-  cp "$WP_SAMPLE_CONFIG_FILE" "$WP_CONFIG_FILE"
+  local esc_name esc_user esc_pass esc_host salts_block
+  esc_name="$(php_single_quote_escape "$DB_NAME")"
+  esc_user="$(php_single_quote_escape "$DB_USER")"
+  esc_pass="$(php_single_quote_escape "$DB_PASS")"
+  esc_host="$(php_single_quote_escape "$DB_HOST")"
+  salts_block="$(generate_wp_salts)"
 
-  # Replace database details in wp-config.php
-  sed -i "s/database_name_here/$DB_NAME/g" "$WP_CONFIG_FILE"
-  sed -i "s/username_here/$DB_USER/g" "$WP_CONFIG_FILE"
-  sed -i "s/password_here/$DB_PASS/g" "$WP_CONFIG_FILE"
-  sed -i "s/localhost/$DB_ADDRESS/g" "$WP_CONFIG_FILE"
+  local salts_written=false
+  local line
+  : >"$config_file"
 
-  return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      *"define("*\'DB_NAME\'*)
+        printf "define( 'DB_NAME', '%s' );\n" "$esc_name" >>"$config_file"
+        ;;
+      *"define("*\'DB_USER\'*)
+        printf "define( 'DB_USER', '%s' );\n" "$esc_user" >>"$config_file"
+        ;;
+      *"define("*\'DB_PASSWORD\'*)
+        printf "define( 'DB_PASSWORD', '%s' );\n" "$esc_pass" >>"$config_file"
+        ;;
+      *"define("*\'DB_HOST\'*)
+        printf "define( 'DB_HOST', '%s' );\n" "$esc_host" >>"$config_file"
+        ;;
+      *"define("*\'AUTH_KEY\'* | *"define("*\'SECURE_AUTH_KEY\'* | *"define("*\'LOGGED_IN_KEY\'* | *"define("*\'NONCE_KEY\'* | \
+        *"define("*\'AUTH_SALT\'* | *"define("*\'SECURE_AUTH_SALT\'* | *"define("*\'LOGGED_IN_SALT\'* | *"define("*\'NONCE_SALT\'*)
+        if [[ "$salts_written" == false ]]; then
+          printf '%s\n' "$salts_block" >>"$config_file"
+          salts_written=true
+        fi
+        ;;
+      *)
+        printf '%s\n' "$line" >>"$config_file"
+        ;;
+    esac
+  done <"$sample_file"
+
+  chmod 640 "$config_file"
 }
 
-# Update .htaccess to ignore the defaults file
 update_htaccess() {
-  local HTACCESS_FILE="wordpress/.htaccess"
-  if [ -f "$HTACCESS_FILE" ]; then
-    if ! grep -q ".wp_install_defaults" "$HTACCESS_FILE"; then
-      echo -e "\n# Ignore .wp_install_defaults file\n<Files .wp_install_defaults>\n\tOrder allow,deny\n\tDeny from all\n</Files>" >> "$HTACCESS_FILE"
+  local wp_dir="$1"
+  local htaccess_file="$wp_dir/.htaccess"
+  local defaults_basename
+  defaults_basename="$(basename "$DEFAULTS_FILE")"
+
+  if [[ -f "$htaccess_file" ]] && grep -qF "$defaults_basename" "$htaccess_file"; then
+    return 0
+  fi
+
+  cat >>"$htaccess_file" <<EOF
+
+# Deny web access to WordPress install defaults file (Apache 2.4+)
+<Files "${defaults_basename}">
+  Require all denied
+</Files>
+EOF
+}
+
+main() {
+  parse_args "$@"
+
+  if [[ "$(id -u)" -eq 0 && "$ALLOW_ROOT" != true ]]; then
+    die "This script should not be run as root for security reasons (pass --root to override)."
+  fi
+
+  check_dependencies
+  load_defaults
+
+  if [[ -z "$DB_NAME" ]]; then
+    colored_echo "$YELLOW" "Provide the database connection credentials"
+    local input_host=""
+    prompt_read "Enter database address [default: $DB_HOST]: " input_host
+    if [[ -n "$input_host" ]]; then
+      DB_HOST="$input_host"
+    fi
+    prompt_read "Enter database name: " DB_NAME
+  fi
+
+  [[ -n "$DB_NAME" ]] || die "Database name cannot be empty."
+
+  if [[ -z "$DB_USER" ]]; then
+    if [[ "$ASSUME_YES" == true ]]; then
+      DB_USER="$DB_NAME"
+    else
+      local input_user=""
+      prompt_read "Enter database username [default: $DB_NAME]: " input_user
+      DB_USER="${input_user:-$DB_NAME}"
     fi
   fi
+
+  if [[ -z "$DB_PASS" && "$ASSUME_YES" != true ]]; then
+    prompt_read "Enter database password: " DB_PASS true
+  fi
+
+  if ! test_db_credentials; then
+    die "Invalid database credentials or database '$DB_NAME' is unreachable on '$DB_HOST'."
+  fi
+  colored_echo "$GREEN" "Database credentials verified."
+
+  if [[ -z "$DEST_DIR" ]]; then
+    if [[ "$ASSUME_YES" == true ]]; then
+      DEST_DIR="./wordpress"
+    else
+      local input_dest=""
+      prompt_read "Enter destination path for WordPress [default: ./wordpress]: " input_dest
+      DEST_DIR="${input_dest:-./wordpress}"
+    fi
+  fi
+
+  if [[ -f "$DEST_DIR/wp-config.php" ]]; then
+    die "Destination '$DEST_DIR' already contains a wp-config.php file. Aborting to avoid overwriting an existing site."
+  fi
+
+  if [[ "$ASSUME_YES" != true ]]; then
+    local confirm=""
+    prompt_read "Proceed with WordPress installation into '$DEST_DIR'? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      die "Installation aborted."
+    fi
+  fi
+
+  TMP_DIR="$(mktemp -d)"
+  download_and_unzip "https://wordpress.org/latest.zip" "$TMP_DIR" || die "Failed to download WordPress core."
+
+  local stage_wp="$TMP_DIR/wordpress"
+  [[ -d "$stage_wp" ]] || die "Expected 'wordpress' directory inside downloaded archive."
+
+  local failed_assets=()
+  local item url
+
+  if [[ "$NO_PLUGINS" != true && ${#PLUGINS[@]} -gt 0 ]]; then
+    for item in "${PLUGINS[@]}"; do
+      if url="$(resolve_asset_url "plugin" "$item")"; then
+        if ! download_and_unzip "$url" "$stage_wp/wp-content/plugins"; then
+          failed_assets+=("plugin:$item")
+        fi
+      else
+        colored_echo "$RED" "Invalid plugin entry: $item" >&2
+        failed_assets+=("plugin:$item")
+      fi
+    done
+  fi
+
+  if [[ ${#THEMES[@]} -gt 0 ]]; then
+    for item in "${THEMES[@]}"; do
+      if url="$(resolve_asset_url "theme" "$item")"; then
+        if ! download_and_unzip "$url" "$stage_wp/wp-content/themes"; then
+          failed_assets+=("theme:$item")
+        fi
+      else
+        colored_echo "$RED" "Invalid theme entry: $item" >&2
+        failed_assets+=("theme:$item")
+      fi
+    done
+  fi
+
+  create_wp_config "$stage_wp"
+  save_defaults "$stage_wp/$(basename "$DEFAULTS_FILE")"
+  update_htaccess "$stage_wp"
+
+  mkdir -p "$DEST_DIR"
+  # Copy/move all files including dotfiles (.htaccess, .wp_install_defaults)
+  (
+    shopt -s dotglob nullglob
+    mv "$stage_wp"/* "$DEST_DIR/"
+  )
+
+  colored_echo "$GREEN" "WordPress installed successfully in '$DEST_DIR'."
+  colored_echo "$BLUE" "If you use Nginx, add a rule denying access to '$(basename "$DEFAULTS_FILE")':"
+  colored_echo "$BLUE" "  location = /$(basename "$DEFAULTS_FILE") { deny all; }"
+
+  if [[ ${#failed_assets[@]} -gt 0 ]]; then
+    colored_echo "$YELLOW" "Warning: Some plugins/themes failed to install: ${failed_assets[*]}" >&2
+  fi
 }
 
-# Ensure the script is not running as root
-if [ "$(id -u)" == "0" ]; then
-  colored_echo $RED "This script should not be run as root for security reasons."
-  exit 1
-fi
-
-# Check for required utilities
-REQUIRED_UTILS=("wget" "mysql" "unzip")
-for UTIL in "${REQUIRED_UTILS[@]}"; do
-  if ! command -v $UTIL &> /dev/null; then
-    colored_echo $RED "The required utility $UTIL is not installed. Please install it and rerun this script."
-    exit 1
-  fi
-done
-
-# Check if the WordPress directory already exists
-if [ -d "wordpress" ]; then
-  colored_echo $RED "Error: A 'wordpress' directory already exists. Please remove or rename it before running this script."
-  exit 1
-fi
-
-# Main script logic
-echo
-
-# Ask for database details
-colored_echo $YELLOW "Provide the database connection credentials"
-
-read -p "Enter database address [default: $DEFAULT_DB_ADDRESS]: " DB_ADDRESS
-DB_ADDRESS=${DB_ADDRESS:-$DEFAULT_DB_ADDRESS}
-read -p "Enter database name: " DB_NAME
-read -p "Enter database username (leave empty to use '$DB_NAME' as username): " DB_USER
-DB_USER=${DB_USER:-$DB_NAME}
-read -sp "Enter database password: " DB_PASS
-echo
-
-# Test database credentials
-if ! test_db_credentials "$DB_NAME" "$DB_USER" "$DB_PASS" "$DB_ADDRESS"; then
-  colored_echo $RED "Invalid database credentials or database name. Exiting."
-  exit 1
-else
-  colored_echo $GREEN "The provided credentials are valid."
-fi
-
-colored_echo $YELLOW "Proceed with installation? (y/n): " -n
-read -n 1 CONFIRM
-echo
-
-if [ "$CONFIRM" != "y" ]; then
-  colored_echo $RED "Installation aborted."
-  exit 1
-fi
-
-# Download WordPress, themes, and plugins
-download_and_unzip "https://wordpress.org/latest.zip" "."
-
-for PLUGIN in "${PLUGINS[@]}"; do
-  if is_url "$PLUGIN"; then
-    download_and_unzip "$PLUGIN" "wordpress/wp-content/plugins"
-  else
-    colored_echo $RED "${PLUGIN} is not a valid URL."
-  fi
-done
-
-for THEME in "${THEMES[@]}"; do
-  if is_url "$THEME"; then
-    download_and_unzip "$THEME" "wordpress/wp-content/themes"
-  else
-    colored_echo $RED "${THEME} is not a valid URL."
-  fi
-done
-
-# Create wp-config.php (basic example, further configuration may be required)
-create_wp_config "$DB_NAME" "$DB_USER" "$DB_PASS" "$DB_ADDRESS"
-
-# Update .htaccess
-update_htaccess
-
-# Prompt Nginx users for manual configuration
-colored_echo $BLUE "If you are using Nginx, please manually update the server block to deny access to .wp_install_defaults."
-
-# Save the plugins and themes to the defaults file
-echo "${PLUGINS[*]};${THEMES[*]}" > "$DEFAULTS_FILE"
-if [ -f "$DEFAULTS_FILE" ]; then
-  mv "$DEFAULTS_FILE" "wordpress/$DEFAULTS_FILE"
-fi
-
-# Prompt for new path
-read -p "Enter a new path for WordPress files or leave empty to keep in the current location: " NEW_PATH
-if [ -n "$NEW_PATH" ]; then
-  mkdir -p "$NEW_PATH"
-  mv wordpress/* "$NEW_PATH/"
-  rm -rf wordpress
-fi
-
-# Prompt to delete the script
-colored_echo $YELLOW "Installation complete. Delete this script? (y/n): " -n
-read -n 1 DEL_SCRIPT
-echo
-if [ "$DEL_SCRIPT" == "y" ]; then
-  rm -- "$0"
-else
-  colored_echo $BLUE "The script file was not deleted."
-fi
-
-# End of the script
-echo
+main "$@"

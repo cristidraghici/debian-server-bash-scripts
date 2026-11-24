@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  lint:
+    name: ShellCheck & shfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install shfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt
+
+      - name: Run ShellCheck
+        run: shellcheck -S warning ./*.sh tests/docker/*.sh
+
+      - name: Check formatting with shfmt
+        run: shfmt -i 2 -ci -d ./*.sh tests/docker/*.sh
+
+  unit-tests:
+    name: BATS unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats openssh-client
+
+      - name: Run BATS tests
+        run: bats tests/unit/
+
+  docker-smoke:
+    name: Docker smoke tests (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - debian:bookworm
+          - debian:trixie
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests in ${{ matrix.image }}
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace:ro" \
+            "${{ matrix.image }}" \
+            bash /workspace/tests/docker/smoke_test.sh

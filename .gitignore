@@ -1,0 +1,19 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Local WordPress / script artifacts
+wordpress/
+.wp_install_defaults
+composer-setup.php
+wp-cli.phar
+wp-cli.phar.sha512
+
+# Test outputs
+*.log
+tmp/

@@ -1,59 +1,157 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# This script installs Composer locally in the user's home directory
+# Install Composer into ~/.local/bin (or a custom directory) with SHA-384 verification.
 
-# Check if the script is run by a regular user, not root
-if [ "$EUID" -eq 0 ]; then
-  echo "Please run as a regular user, not as root"
-  exit
-fi
+ALLOW_ROOT=false
+INSTALL_DIR="$HOME/.local/bin"
+COMPOSER_VERSION=""
+TMP_DIR=""
 
-echo "Installing Composer for user: $(whoami)"
+cleanup() {
+  if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
+}
+trap cleanup EXIT
 
-# Define the installation directory and the composer binary path
-INSTALL_DIR=$HOME/.composer
-COMPOSER_BIN=$HOME/composer
+usage() {
+  cat <<'EOF'
+Usage: install_composer.sh [OPTIONS]
 
-# Create the installation directory if it does not exist
-mkdir -p $INSTALL_DIR
+Download, verify (SHA-384), and install Composer for the current user.
 
-# Download Composer installer
-php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+Options:
+      --root                 Allow running as the root user
+      --install-dir <path>   Installation directory (default: ~/.local/bin)
+      --version <ver>        Install a specific Composer version (e.g. 2.8.1)
+  -h, --help                 Show this help message and exit
 
-# Verify installer SHA-384
-EXPECTED_SIGNATURE="$(wget -q -O - https://composer.github.io/installer.sig)"
-ACTUAL_SIGNATURE="$(php -r "echo hash_file('SHA384', 'composer-setup.php');")"
+Examples:
+  ./install_composer.sh
+  ./install_composer.sh --version 2.8.1
+  ./install_composer.sh --install-dir "$HOME/bin"
+EOF
+}
 
-if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]
-then
-  >&2 echo 'ERROR: Invalid installer signature'
-  rm composer-setup.php
+die() {
+  echo "Error: $*" >&2
   exit 1
-fi
+}
 
-# Run the installer
-php composer-setup.php --quiet --install-dir=$INSTALL_DIR --filename=composer
-RESULT=$?
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --root)
+        ALLOW_ROOT=true
+        shift
+        ;;
+      --install-dir)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        INSTALL_DIR="$2"
+        shift 2
+        ;;
+      --version)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        COMPOSER_VERSION="$2"
+        shift 2
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown option: $1 (use --help for usage)"
+        ;;
+    esac
+  done
+}
 
-# Remove the installer
-rm composer-setup.php
+check_dependencies() {
+  local util
+  for util in php curl; do
+    if ! command -v "$util" >/dev/null 2>&1; then
+      die "Required utility '$util' is not installed. Please install it and rerun this script."
+    fi
+  done
+}
 
-# Check if installation was successful
-if [ $RESULT -eq 0 ]; then
-  echo "Composer installed successfully in $COMPOSER_BIN"
-else
-  echo "Composer installation failed"
-  exit 1
-fi
+ensure_path_in_rc() {
+  local rc_file="$1"
+  local path_entry="$INSTALL_DIR"
+  local export_line="export PATH=\"${INSTALL_DIR}:\$PATH\""
 
-# Update PATH in .bashrc if the bin directory is not already in PATH
-if [ -f $HOME/.bashrc ] && ! grep -q "$INSTALL_DIR" $HOME/.bashrc; then
-  echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> $HOME/.bashrc
-  echo "Please log out and log back in or source .bashrc to update PATH."
-fi
+  if [[ "$INSTALL_DIR" == "$HOME/.local/bin" ]]; then
+    export_line='export PATH="$HOME/.local/bin:$PATH"'
+  fi
 
-# Update PATH in .zshrc if the bin directory is not already in PATH
-if [ -f $HOME/.zshrc ] && ! grep -q "$INSTALL_DIR" $HOME/.zshrc; then
-  echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> $HOME/.zshrc
-  echo "Please log out and log back in or source .zshrc to update PATH."
-fi
+  if [[ ! -f "$rc_file" ]]; then
+    return 0
+  fi
+
+  if grep -qF "$path_entry" "$rc_file" ||
+    ([[ "$INSTALL_DIR" == "$HOME/.local/bin" ]] && grep -qF '$HOME/.local/bin' "$rc_file"); then
+    return 0
+  fi
+
+  printf '\n%s\n' "$export_line" >>"$rc_file"
+  echo "Added $INSTALL_DIR to PATH in $rc_file. Restart your shell or source it to apply."
+}
+
+main() {
+  parse_args "$@"
+
+  if [[ "$(id -u)" -eq 0 && "$ALLOW_ROOT" != true ]]; then
+    die "Please run as a regular user, or pass --root to explicitly allow running as root."
+  fi
+
+  check_dependencies
+
+  if [[ -n "$COMPOSER_VERSION" && ! "$COMPOSER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9]+)?$ ]]; then
+    die "Invalid Composer version '$COMPOSER_VERSION'."
+  fi
+
+  echo "Installing Composer for user $(id -un) into $INSTALL_DIR..."
+
+  TMP_DIR="$(mktemp -d)"
+  local setup_file="$TMP_DIR/composer-setup.php"
+
+  if ! curl -fsSL "https://getcomposer.org/installer" -o "$setup_file"; then
+    die "Failed to download Composer installer."
+  fi
+
+  local expected_signature actual_signature
+  expected_signature="$(curl -fsSL "https://composer.github.io/installer.sig" | tr -d '[:space:]')"
+  if [[ ! "$expected_signature" =~ ^[0-9a-fA-F]{96}$ ]]; then
+    die "Invalid or empty expected SHA-384 signature from composer.github.io."
+  fi
+
+  actual_signature="$(php -r 'echo hash_file("sha384", $argv[1]);' "$setup_file")"
+  if [[ "$expected_signature" != "$actual_signature" ]]; then
+    die "Composer installer SHA-384 signature mismatch."
+  fi
+
+  mkdir -p "$INSTALL_DIR"
+
+  local installer_args=(--quiet "--install-dir=$INSTALL_DIR" --filename=composer)
+  if [[ -n "$COMPOSER_VERSION" ]]; then
+    installer_args+=("--version=$COMPOSER_VERSION")
+  fi
+
+  if ! php "$setup_file" "${installer_args[@]}"; then
+    die "Composer installation failed."
+  fi
+
+  local composer_bin="$INSTALL_DIR/composer"
+  if [[ ! -x "$composer_bin" ]]; then
+    die "Expected Composer binary not found at $composer_bin."
+  fi
+
+  echo "Composer installed successfully at $composer_bin."
+  COMPOSER_ALLOW_SUPERUSER=1 "$composer_bin" --version
+
+  ensure_path_in_rc "$HOME/.bashrc"
+  ensure_path_in_rc "$HOME/.zshrc"
+}
+
+main "$@"
