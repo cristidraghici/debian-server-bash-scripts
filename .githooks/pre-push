@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ! -t 0 ]]; then
+  saw_ref=0
+  has_non_delete=0
+  while read -r _ local_sha _ _; do
+    if [[ -z "${local_sha:-}" ]]; then
+      continue
+    fi
+    saw_ref=1
+    if [[ ! "$local_sha" =~ ^0+$ ]]; then
+      has_non_delete=1
+    fi
+  done
+
+  if [[ "$saw_ref" -eq 1 && "$has_non_delete" -eq 0 ]]; then
+    echo "Skipping pre-push checks for delete-only push."
+    exit 0
+  fi
+fi
+
+if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+cd "$repo_root"
+
+missing_tools=()
+for tool in shellcheck shfmt bats; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    missing_tools+=("$tool")
+  fi
+done
+
+if [[ "${#missing_tools[@]}" -gt 0 ]]; then
+  echo "Error: Missing required pre-push tool(s): ${missing_tools[*]}" >&2
+  echo "Install them with:" >&2
+  echo "  macOS (Homebrew): brew install shellcheck shfmt bats-core" >&2
+  echo "  Debian/Ubuntu:    sudo apt-get install -y shellcheck shfmt bats" >&2
+  exit 1
+fi
+
+echo "==> Running ShellCheck..."
+shellcheck -S warning ./*.sh tests/docker/*.sh .githooks/pre-push
+
+echo "==> Checking formatting with shfmt..."
+shfmt -i 2 -ci -d ./*.sh tests/docker/*.sh .githooks/pre-push
+
+echo "==> Running BATS unit tests..."
+bats tests/unit/

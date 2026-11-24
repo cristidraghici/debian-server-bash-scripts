@@ -19,10 +19,10 @@ jobs:
           sudo apt-get install -y shellcheck shfmt
 
       - name: Run ShellCheck
-        run: shellcheck -S warning ./*.sh tests/docker/*.sh
+        run: shellcheck -S warning ./*.sh tests/docker/*.sh .githooks/pre-push
 
       - name: Check formatting with shfmt
-        run: shfmt -i 2 -ci -d ./*.sh tests/docker/*.sh
+        run: shfmt -i 2 -ci -d ./*.sh tests/docker/*.sh .githooks/pre-push
 
   unit-tests:
     name: BATS unit tests

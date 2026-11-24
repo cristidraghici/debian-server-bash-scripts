@@ -129,8 +129,8 @@ theme:twentytwentyfive
 Run static analysis locally:
 
 ```bash
-shellcheck -S warning ./*.sh tests/docker/*.sh
-shfmt -i 2 -ci -d ./*.sh tests/docker/*.sh
+shellcheck -S warning ./*.sh tests/docker/*.sh .githooks/pre-push
+shfmt -i 2 -ci -d ./*.sh tests/docker/*.sh .githooks/pre-push
 ```
 
 Run BATS unit tests:
@@ -144,6 +144,24 @@ Run the full Docker smoke test suite on Debian 12 or 13:
 ```bash
 docker run --rm -v "$PWD:/workspace:ro" debian:bookworm bash /workspace/tests/docker/smoke_test.sh
 docker run --rm -v "$PWD:/workspace:ro" debian:trixie bash /workspace/tests/docker/smoke_test.sh
+```
+
+## Git Hooks
+
+This project includes a `pre-push` Git hook in `.githooks/pre-push` that runs `shellcheck`, `shfmt`, and the BATS unit tests before pushing (delete-only pushes are skipped). To enable these hooks locally, run:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Ensure the required local tools are installed:
+
+```bash
+# macOS (Homebrew)
+brew install shellcheck shfmt bats-core
+
+# Debian / Ubuntu
+sudo apt-get install -y shellcheck shfmt bats
 ```
 
 ## License

@@ -25,8 +25,8 @@ apt-get install -y -qq --no-install-recommends \
   zsh
 
 echo "==> Running ShellCheck and shfmt..."
-shellcheck -S warning "$WORKSPACE"/*.sh "$WORKSPACE"/tests/docker/*.sh
-shfmt -i 2 -ci -d "$WORKSPACE"/*.sh "$WORKSPACE"/tests/docker/*.sh
+shellcheck -S warning "$WORKSPACE"/*.sh "$WORKSPACE"/tests/docker/*.sh "$WORKSPACE/.githooks/pre-push"
+shfmt -i 2 -ci -d "$WORKSPACE"/*.sh "$WORKSPACE"/tests/docker/*.sh "$WORKSPACE/.githooks/pre-push"
 
 echo "==> Running BATS unit tests inside $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')..."
 bats "$WORKSPACE/tests/unit/"
