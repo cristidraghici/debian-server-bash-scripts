@@ -161,12 +161,14 @@ validate_inputs() {
     fi
   fi
 
-  local ip
-  for ip in "${IGNORE_IPS[@]}"; do
-    if [[ ! "$ip" =~ ^[0-9a-fA-F.:/]+$ ]]; then
-      die "Invalid --ignore-ip value '${ip}'."
-    fi
-  done
+  if [[ ${#IGNORE_IPS[@]} -gt 0 ]]; then
+    local ip
+    for ip in "${IGNORE_IPS[@]}"; do
+      if [[ ! "$ip" =~ ^[0-9a-fA-F.:/]+$ ]]; then
+        die "Invalid --ignore-ip value '${ip}'."
+      fi
+    done
+  fi
 }
 
 check_os() {
@@ -387,10 +389,12 @@ configure_fail2ban() {
   mkdir -p "$jail_dir"
 
   local ignore_list="127.0.0.1/8 ::1"
-  local ip
-  for ip in "${IGNORE_IPS[@]}"; do
-    ignore_list+=" ${ip}"
-  done
+  if [[ ${#IGNORE_IPS[@]} -gt 0 ]]; then
+    local ip
+    for ip in "${IGNORE_IPS[@]}"; do
+      ignore_list+=" ${ip}"
+    done
+  fi
 
   colored_echo "$BLUE" "Configuring strict Fail2ban jails (maxretry=3, bantime=24h, recidive)..."
   cat >"${jail_dir}/00-defaults.local" <<EOF

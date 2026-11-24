@@ -232,12 +232,16 @@ save_defaults() {
     echo "# WordPress install defaults (one entry per line)"
     echo "# Format: plugin:<slug-or-url> or theme:<slug-or-url>"
     local item
-    for item in "${PLUGINS[@]}"; do
-      printf 'plugin:%s\n' "$item"
-    done
-    for item in "${THEMES[@]}"; do
-      printf 'theme:%s\n' "$item"
-    done
+    if [[ ${#PLUGINS[@]} -gt 0 ]]; then
+      for item in "${PLUGINS[@]}"; do
+        printf 'plugin:%s\n' "$item"
+      done
+    fi
+    if [[ ${#THEMES[@]} -gt 0 ]]; then
+      for item in "${THEMES[@]}"; do
+        printf 'theme:%s\n' "$item"
+      done
+    fi
   } >"$target_file"
 }
 
@@ -287,9 +291,17 @@ download_and_unzip() {
 
 php_single_quote_escape() {
   local val="$1"
-  val="${val//\\/\\\\}"
-  val="${val//\'/\\\'}"
-  printf '%s' "$val"
+  local out=""
+  local i ch
+  for ((i = 0; i < ${#val}; i++)); do
+    ch="${val:i:1}"
+    if [[ "$ch" == '\' || "$ch" == "'" ]]; then
+      out+="\\${ch}"
+    else
+      out+="$ch"
+    fi
+  done
+  printf '%s' "$out"
 }
 
 generate_wp_salts() {
