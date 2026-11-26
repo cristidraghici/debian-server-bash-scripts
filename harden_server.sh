@@ -556,6 +556,9 @@ main() {
   if [[ "$SSH_PORT" != "$CURRENT_SSH_PORT" ]]; then
     colored_echo "$YELLOW" "IMPORTANT: Test SSH login on port ${SSH_PORT} in a new terminal before closing this session!"
   fi
+  colored_echo "$YELLOW" "Note: Root SSH login is disabled; repeated failed attempts (including testing root login) will trigger a 24h Fail2ban ban."
+  colored_echo "$BLUE" "If you get banned, unban your IP from the provider console with:"
+  colored_echo "$BLUE" "  sudo fail2ban-client set sshd unbanip <your-ip>"
 }
 
 main "$@"

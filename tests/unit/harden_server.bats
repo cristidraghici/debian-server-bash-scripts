@@ -122,6 +122,10 @@ teardown() {
   # Unattended upgrades
   grep -qF 'APT::Periodic::Unattended-Upgrade "1";' "$FAKE_ROOT/etc/apt/apt.conf.d/20auto-upgrades"
   grep -qF 'Unattended-Upgrade::Automatic-Reboot "false";' "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
+
+  # Final root-login / Fail2ban unban notice
+  [[ "$output" == *"Root SSH login is disabled"* ]]
+  [[ "$output" == *"sudo fail2ban-client set sshd unbanip <your-ip>"* ]]
 }
 
 @test "harden_server keeps PasswordAuthentication when no non-root SSH keys exist" {
