@@ -174,6 +174,7 @@ fi
   [ -f "$FAKE_ROOT/etc/fail2ban/jail.d/30-virtualmin.local" ]
   grep -qF "[webmin-auth]" "$FAKE_ROOT/etc/fail2ban/jail.d/30-virtualmin.local"
   grep -qF "port = 20443" "$FAKE_ROOT/etc/fail2ban/jail.d/30-virtualmin.local"
+  grep -qF "banaction = firewallcmd-rich-rules" "$FAKE_ROOT/etc/fail2ban/jail.d/30-virtualmin.local"
   grep -qF "maxretry = 3" "$FAKE_ROOT/etc/fail2ban/jail.d/30-virtualmin.local"
   grep -qF "bantime = 24h" "$FAKE_ROOT/etc/fail2ban/jail.d/30-virtualmin.local"
 
@@ -213,4 +214,37 @@ exit 0
   [ "$status" -eq 0 ]
   [[ "$output" == *"Manual fallback to enable Jailkit"* ]]
   [[ "$output" == *"Chroot jail new domain Unix users?"* ]]
+}
+
+@test "install_virtualmin disables Virtualmin nftables, removes virtualmin-nftables.conf, and restores unattended-upgrades" {
+  touch "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf"
+  mkdir -p "$FAKE_ROOT/etc/apt/apt.conf.d"
+  touch "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
+
+  run bash "$REPO_ROOT/install_virtualmin.sh" --skip-install --skip-update --webmin-port 20443 -y
+  [ "$status" -eq 0 ]
+
+  grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
+  grep -qF "systemctl enable --now firewalld" "$MOCK_LOG"
+  grep -qF "systemctl restart firewalld" "$MOCK_LOG"
+  grep -qF "systemctl enable --now unattended-upgrades" "$MOCK_LOG"
+  [ ! -f "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf" ]
+}
+
+@test "install_virtualmin does not touch nftables or unattended-upgrades when neither is enabled" {
+  create_mock systemctl '
+echo "systemctl $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == "is-active" || "${1:-}" == "is-enabled" ]]; then
+  if [[ "${3:-}" == "nftables" || "${3:-}" == "unattended-upgrades" ]]; then
+    exit 3
+  fi
+fi
+exit 0
+'
+
+  run bash "$REPO_ROOT/install_virtualmin.sh" --skip-install --skip-update --webmin-port 20443 -y
+  [ "$status" -eq 0 ]
+
+  run ! grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
+  run ! grep -qF "systemctl enable --now unattended-upgrades" "$MOCK_LOG"
 }

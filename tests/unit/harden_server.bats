@@ -41,7 +41,7 @@ exit 0
   create_mock systemctl '
 echo "systemctl $*" >>"$MOCK_LOG"
 if [[ "${1:-}" == "is-active" || "${1:-}" == "is-enabled" ]]; then
-  if [[ "${3:-}" == "ssh.socket" ]]; then
+  if [[ "${3:-}" == "ssh.socket" || "${3:-}" == "nftables" ]]; then
     exit 3
   fi
   exit 0
@@ -192,4 +192,24 @@ EOF
   grep -qF 'Unattended-Upgrade::Automatic-Reboot "true";' "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
   grep -qF 'Unattended-Upgrade::Automatic-Reboot-Time "04:30";' "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
   grep -qF 'Unattended-Upgrade::Mail "admin@example.com";' "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
+}
+
+@test "harden_server disables conflicting nftables.service and removes virtualmin-nftables.conf" {
+  touch "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf"
+  create_mock systemctl '
+echo "systemctl $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == "is-active" || "${1:-}" == "is-enabled" ]]; then
+  if [[ "${3:-}" == "ssh.socket" ]]; then
+    exit 3
+  fi
+  exit 0
+fi
+exit 0
+'
+
+  run bash "$REPO_ROOT/harden_server.sh" --ssh-port 2222 --skip-update -y
+  [ "$status" -eq 0 ]
+  grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
+  grep -qF "systemctl restart firewalld" "$MOCK_LOG"
+  [ ! -f "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf" ]
 }

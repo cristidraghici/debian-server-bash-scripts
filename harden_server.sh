@@ -275,7 +275,14 @@ configure_firewalld_pre_ssh() {
   fi
 
   if command -v systemctl >/dev/null 2>&1; then
-    systemctl enable --now firewalld
+    if systemctl is-active --quiet nftables 2>/dev/null || systemctl is-enabled --quiet nftables 2>/dev/null; then
+      colored_echo "$BLUE" "Disabling conflicting nftables.service so firewalld is the sole firewall..."
+      systemctl disable --now nftables 2>/dev/null || true
+      systemctl enable --now firewalld
+      systemctl restart firewalld
+    else
+      systemctl enable --now firewalld
+    fi
   fi
 
   colored_echo "$BLUE" "Allowing SSH port ${SSH_PORT}/tcp in firewalld..."
@@ -387,6 +394,12 @@ EOF
 configure_fail2ban() {
   local jail_dir="${ROOT_DIR}/etc/fail2ban/jail.d"
   mkdir -p "$jail_dir"
+
+  local nft_override="${jail_dir}/virtualmin-nftables.conf"
+  if [[ -f "$nft_override" ]]; then
+    colored_echo "$BLUE" "Removing conflicting Virtualmin nftables Fail2ban override (${nft_override})..."
+    rm -f "$nft_override"
+  fi
 
   local ignore_list="127.0.0.1/8 ::1"
   if [[ ${#IGNORE_IPS[@]} -gt 0 ]]; then

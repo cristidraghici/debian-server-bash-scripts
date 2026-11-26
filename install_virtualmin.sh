@@ -388,7 +388,14 @@ configure_firewalld() {
   fi
 
   if command -v systemctl >/dev/null 2>&1; then
-    systemctl enable --now firewalld
+    if systemctl is-active --quiet nftables 2>/dev/null || systemctl is-enabled --quiet nftables 2>/dev/null; then
+      colored_echo "$BLUE" "Disabling conflicting nftables.service so firewalld is the sole firewall..."
+      systemctl disable --now nftables 2>/dev/null || true
+      systemctl enable --now firewalld
+      systemctl restart firewalld
+    else
+      systemctl enable --now firewalld
+    fi
   fi
 
   colored_echo "$BLUE" "Configuring firewalld (SSH ${ssh_port}/tcp, HTTP/HTTPS, Webmin ${WEBMIN_PORT}/tcp; closing 10000/tcp)..."
@@ -418,6 +425,12 @@ configure_fail2ban_handoff() {
   fi
 
   mkdir -p "$jail_dir"
+  local nft_override="${jail_dir}/virtualmin-nftables.conf"
+  if [[ -f "$nft_override" ]]; then
+    colored_echo "$BLUE" "Removing conflicting Virtualmin nftables Fail2ban override (${nft_override})..."
+    rm -f "$nft_override"
+  fi
+
   colored_echo "$BLUE" "Adding Fail2ban webmin-auth jail for port ${WEBMIN_PORT}..."
   cat >"${jail_dir}/30-virtualmin.local" <<EOF
 # Managed by install_virtualmin.sh
@@ -425,6 +438,7 @@ configure_fail2ban_handoff() {
 enabled = true
 port = ${WEBMIN_PORT}
 backend = systemd
+banaction = firewallcmd-rich-rules
 bantime = 24h
 findtime = 10m
 maxretry = 3
@@ -511,7 +525,17 @@ main() {
 
   TMP_DIR="$(mktemp -d)"
 
+  local restore_unattended_upgrades=false
+  if [[ -f "${ROOT_DIR}/etc/apt/apt.conf.d/51unattended-upgrades-local" ]] ||
+    (command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet unattended-upgrades 2>/dev/null); then
+    restore_unattended_upgrades=true
+  fi
+
   install_virtualmin_minimal
+  if [[ "$restore_unattended_upgrades" == true ]] && command -v systemctl >/dev/null 2>&1; then
+    colored_echo "$BLUE" "Re-enabling unattended-upgrades (disabled by Virtualmin installer)..."
+    systemctl enable --now unattended-upgrades 2>/dev/null || true
+  fi
   install_and_configure_jailkit
   purge_usermin_if_present
   configure_webmin_and_virtualmin_defaults
