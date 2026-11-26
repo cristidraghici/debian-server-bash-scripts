@@ -11,7 +11,9 @@ setup() {
   mkdir -p \
     "$FAKE_ROOT/etc/webmin/virtual-server" \
     "$FAKE_ROOT/etc/usermin" \
-    "$FAKE_ROOT/etc/fail2ban/jail.d"
+    "$FAKE_ROOT/etc/fail2ban/jail.d" \
+    "$FAKE_ROOT/etc/apache2/conf-available" \
+    "$FAKE_ROOT/etc/apache2/conf-enabled"
 
   cat >"$FAKE_ROOT/etc/os-release" <<'EOF'
 ID=debian
@@ -35,6 +37,7 @@ EOF
   create_mock apt-get 'echo "apt-get $*" >>"$MOCK_LOG"'
   create_mock firewall-cmd 'echo "firewall-cmd $*" >>"$MOCK_LOG"'
   create_mock fail2ban-client 'echo "fail2ban-client $*" >>"$MOCK_LOG"'
+  create_mock apache2ctl 'echo "apache2ctl $*" >>"$MOCK_LOG"'
   create_mock systemctl 'echo "systemctl $*" >>"$MOCK_LOG"'
   create_mock dpkg-query '
 if [[ "$*" == *"usermin"* ]]; then
@@ -183,6 +186,14 @@ fi
   grep -qF "https://panel.example.com:20443" "$FAKE_ROOT/etc/update-motd.d/99-virtualmin-hosting"
   grep -qF "sudo -u <domain-user> -H /bin/bash" "$FAKE_ROOT/etc/update-motd.d/99-virtualmin-hosting"
   grep -qF "sudo -u <domain-user> /usr/bin/php -v" "$FAKE_ROOT/etc/update-motd.d/99-virtualmin-hosting"
+
+  # Low-RAM Apache tuning applied for LAMP
+  [ -f "$FAKE_ROOT/etc/apache2/conf-available/99-virtualmin-lowram.conf" ]
+  [ -L "$FAKE_ROOT/etc/apache2/conf-enabled/99-virtualmin-lowram.conf" ]
+  grep -qF "KeepAliveTimeout 3" "$FAKE_ROOT/etc/apache2/conf-available/99-virtualmin-lowram.conf"
+  grep -qF "MaxRequestWorkers       50" "$FAKE_ROOT/etc/apache2/conf-available/99-virtualmin-lowram.conf"
+  grep -qF "apache2ctl -t" "$MOCK_LOG"
+  grep -qF "systemctl reload-or-restart apache2" "$MOCK_LOG"
 }
 
 @test "install_virtualmin skips upstream installer on re-run and supports LEMP + custom quota" {
@@ -199,6 +210,7 @@ fi
   run ! grep -qF "virtualmin-install" "$MOCK_LOG"
   run ! grep -qF "apt-get update" "$MOCK_LOG"
   grep -qF "virtualmin modify-plan --id 0 --quota 5242880 --admin-quota 5242880" "$MOCK_LOG"
+  [ ! -f "$FAKE_ROOT/etc/apache2/conf-available/99-virtualmin-lowram.conf" ]
 }
 
 @test "install_virtualmin prints manual Jailkit fallback when modify-template fails" {
@@ -247,4 +259,17 @@ exit 0
 
   run ! grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
   run ! grep -qF "systemctl enable --now unattended-upgrades" "$MOCK_LOG"
+}
+
+@test "install_virtualmin rolls back Apache low-RAM tuning when apache2ctl -t fails" {
+  create_mock apache2ctl '
+echo "apache2ctl $*" >>"$MOCK_LOG"
+exit 1
+'
+
+  run bash "$REPO_ROOT/install_virtualmin.sh" --skip-install --skip-update --webmin-port 20443 -y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rolling back Apache tuning"* ]]
+  [ ! -f "$FAKE_ROOT/etc/apache2/conf-available/99-virtualmin-lowram.conf" ]
+  [ ! -L "$FAKE_ROOT/etc/apache2/conf-enabled/99-virtualmin-lowram.conf" ]
 }

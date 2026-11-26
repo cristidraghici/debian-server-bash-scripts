@@ -380,6 +380,55 @@ configure_webmin_and_virtualmin_defaults() {
   fi
 }
 
+configure_apache_lowram() {
+  if [[ "$BUNDLE" != "LAMP" ]]; then
+    return 0
+  fi
+
+  local conf_avail="${ROOT_DIR}/etc/apache2/conf-available"
+  local conf_enabled="${ROOT_DIR}/etc/apache2/conf-enabled"
+  local conf_file="${conf_avail}/99-virtualmin-lowram.conf"
+  local conf_link="${conf_enabled}/99-virtualmin-lowram.conf"
+
+  if [[ ! -d "$conf_avail" ]]; then
+    colored_echo "$YELLOW" "Warning: ${conf_avail} not found; skipping Apache low-RAM tuning."
+    return 0
+  fi
+
+  mkdir -p "$conf_enabled"
+  colored_echo "$BLUE" "Applying low-RAM Apache timeout and mpm_event worker tuning (${conf_file})..."
+  cat >"$conf_file" <<'EOF'
+# Managed by install_virtualmin.sh
+# Tight timeouts and conservative mpm_event worker caps for low-RAM servers
+
+Timeout 30
+KeepAlive On
+MaxKeepAliveRequests 100
+KeepAliveTimeout 3
+
+<IfModule mpm_event_module>
+    StartServers            1
+    MinSpareThreads         10
+    MaxSpareThreads         25
+    ThreadsPerChild         25
+    MaxRequestWorkers       50
+    MaxConnectionsPerChild  1000
+</IfModule>
+EOF
+
+  ln -sfn "../conf-available/99-virtualmin-lowram.conf" "$conf_link"
+
+  if command -v apache2ctl >/dev/null 2>&1 && ! apache2ctl -t >/dev/null 2>&1; then
+    colored_echo "$YELLOW" "Warning: apache2ctl -t failed after adding ${conf_file}; rolling back Apache tuning."
+    rm -f "$conf_link" "$conf_file"
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet apache2 2>/dev/null; then
+    systemctl reload-or-restart apache2
+  fi
+}
+
 configure_firewalld() {
   local ssh_port="$1"
   if ! command -v firewall-cmd >/dev/null 2>&1; then
@@ -539,6 +588,7 @@ main() {
   install_and_configure_jailkit
   purge_usermin_if_present
   configure_webmin_and_virtualmin_defaults
+  configure_apache_lowram
   configure_firewalld "$ssh_port"
   configure_fail2ban_handoff
   install_motd

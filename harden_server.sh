@@ -5,6 +5,7 @@ set -euo pipefail
 # - Hardens OpenSSH via /etc/ssh/sshd_config.d/99-hardening.conf (validated with sshd -t)
 # - Configures firewalld for the active SSH port (preserving existing Webmin/web rules)
 # - Installs and configures strict Fail2ban (backend=systemd, maxretry=3, bantime=24h, recidive)
+# - Applies low-RAM kernel sysctl (SYN cookies, nf_conntrack limits/timeouts, swappiness) and journald caps
 # - Installs and configures unattended-upgrades for daily security patches
 
 ROOT_DIR="${HARDEN_ROOT_DIR:-}"
@@ -501,6 +502,63 @@ EOF
   fi
 }
 
+configure_sysctl() {
+  local modules_dir="${ROOT_DIR}/etc/modules-load.d"
+  local sysctl_dir="${ROOT_DIR}/etc/sysctl.d"
+  local sysctl_conf="${sysctl_dir}/99-hardening.conf"
+
+  mkdir -p "$modules_dir" "$sysctl_dir"
+
+  # Ensure nf_conntrack loads before systemd-sysctl applies net.netfilter.* on boot
+  printf 'nf_conntrack\n' >"${modules_dir}/99-nf_conntrack.conf"
+
+  colored_echo "$BLUE" "Applying low-RAM kernel sysctl tuning (${sysctl_conf})..."
+  cat >"$sysctl_conf" <<'EOF'
+# Managed by harden_server.sh
+# Low-RAM network flood resilience and swap tuning
+
+# SYN flood protection and TCP hygiene
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Connection tracking limits and shorter timeouts (safe on 1-2 GB RAM)
+net.netfilter.nf_conntrack_max = 65536
+net.netfilter.nf_conntrack_tcp_timeout_established = 1800
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_close_wait = 30
+net.netfilter.nf_conntrack_tcp_timeout_syn_recv = 20
+
+# Prefer keeping active services in RAM while using swap as an OOM safety net
+vm.swappiness = 10
+EOF
+
+  if [[ -z "$ROOT_DIR" ]] && command -v sysctl >/dev/null 2>&1; then
+    sysctl -e -p "$sysctl_conf" >/dev/null 2>&1 || true
+  fi
+}
+
+configure_journald() {
+  local journald_dir="${ROOT_DIR}/etc/systemd/journald.conf.d"
+  local journald_conf="${journald_dir}/99-hardening.conf"
+
+  mkdir -p "$journald_dir"
+  colored_echo "$BLUE" "Capping systemd-journald disk and RAM usage (${journald_conf})..."
+  cat >"$journald_conf" <<'EOF'
+# Managed by harden_server.sh
+[Journal]
+SystemMaxUse=100M
+RuntimeMaxUse=50M
+EOF
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl restart systemd-journald 2>/dev/null || true
+  fi
+}
+
 main() {
   parse_args "$@"
 
@@ -535,6 +593,7 @@ main() {
     echo "  - SSH port: ${CURRENT_SSH_PORT} -> ${SSH_PORT} (PermitRootLogin no)"
     echo "  - Firewall: firewalld (allow SSH ${SSH_PORT}/tcp)"
     echo "  - Fail2ban: systemd backend, maxretry=3, bantime=24h, sshd + recidive"
+    echo "  - Sysctl & journald: low-RAM nf_conntrack/SYN-flood tuning, 100M journal cap"
     echo "  - Unattended upgrades: daily security updates (auto-reboot=${AUTO_REBOOT})"
     local confirm=""
     prompt_read "Proceed with server hardening? [y/N]: " confirm
@@ -550,6 +609,8 @@ main() {
   configure_ssh
   configure_firewalld_post_ssh
   configure_fail2ban
+  configure_sysctl
+  configure_journald
   configure_unattended_upgrades
 
   colored_echo "$GREEN" "Server hardening completed successfully."

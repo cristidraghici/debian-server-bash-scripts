@@ -123,6 +123,16 @@ teardown() {
   grep -qF 'APT::Periodic::Unattended-Upgrade "1";' "$FAKE_ROOT/etc/apt/apt.conf.d/20auto-upgrades"
   grep -qF 'Unattended-Upgrade::Automatic-Reboot "false";' "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
 
+  # Low-RAM sysctl, nf_conntrack boot module, and journald caps
+  grep -qF "nf_conntrack" "$FAKE_ROOT/etc/modules-load.d/99-nf_conntrack.conf"
+  grep -qF "net.ipv4.tcp_syncookies = 1" "$FAKE_ROOT/etc/sysctl.d/99-hardening.conf"
+  grep -qF "net.netfilter.nf_conntrack_max = 65536" "$FAKE_ROOT/etc/sysctl.d/99-hardening.conf"
+  grep -qF "net.netfilter.nf_conntrack_tcp_timeout_established = 1800" "$FAKE_ROOT/etc/sysctl.d/99-hardening.conf"
+  grep -qF "vm.swappiness = 10" "$FAKE_ROOT/etc/sysctl.d/99-hardening.conf"
+  grep -qF "SystemMaxUse=100M" "$FAKE_ROOT/etc/systemd/journald.conf.d/99-hardening.conf"
+  grep -qF "RuntimeMaxUse=50M" "$FAKE_ROOT/etc/systemd/journald.conf.d/99-hardening.conf"
+  grep -qF "systemctl restart systemd-journald" "$MOCK_LOG"
+
   # Final root-login / Fail2ban unban notice
   [[ "$output" == *"Root SSH login is disabled"* ]]
   [[ "$output" == *"sudo fail2ban-client set sshd unbanip <your-ip>"* ]]
