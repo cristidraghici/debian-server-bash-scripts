@@ -397,7 +397,7 @@ main() {
   parse_args "$@"
 
   if [[ "$(id -u)" -eq 0 && "$ALLOW_ROOT" != true ]]; then
-    die "This script should not be run as root for security reasons (pass --root to override)."
+    die "This script should not be run as root for security reasons (pass --root to override; when piped: ... | bash -s -- --root)."
   fi
 
   check_dependencies

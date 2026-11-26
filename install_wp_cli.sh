@@ -103,7 +103,7 @@ main() {
   parse_args "$@"
 
   if [[ "$(id -u)" -eq 0 && "$ALLOW_ROOT" != true ]]; then
-    die "Please run as a regular user, or pass --root to explicitly allow running as root."
+    die "Please run as a regular user, or pass --root to explicitly allow running as root (when piped: ... | bash -s -- --root)."
   fi
 
   check_dependencies

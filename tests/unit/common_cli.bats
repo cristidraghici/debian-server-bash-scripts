@@ -54,5 +54,6 @@ SCRIPTS=(
     run bash "$REPO_ROOT/$script"
     [ "$status" -eq 1 ]
     [[ "$output" == *"--root"* ]]
+    [[ "$output" == *"bash -s -- --root"* ]]
   done
 }
