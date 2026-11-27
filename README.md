@@ -101,7 +101,7 @@ What this configures:
 
 - **Virtualmin minimal (`LAMP`)**: Apache, MariaDB, PHP, and Webmin (pass `-s -- --bundle LEMP` if you prefer Nginx).
 - **Restrictive Jailkit**: installs `jailkit` + `webmin-jailkit` and enables chroot jailing on Virtualmin's **Default Settings** template.
-- **Hardened panel**: purges Usermin (no mail stack), moves Webmin to your custom port, closes `10000/tcp`, and sets full-domain usernames, editable limits, and a `2 GB` default quota.
+- **Hardened panel**: purges Usermin (no mail stack), moves Webmin to your custom port, closes `10000/tcp`, disables automatic `webmail.`/`admin.` redirects on Default Settings (preventing Let's Encrypt port-redirect failures), and sets full-domain usernames, editable limits, and a `2 GB` default quota.
 - **Firewall, Fail2ban & MOTD**: preserves your custom SSH port in `firewalld`, opens HTTP/HTTPS + your Webmin port, adds the `webmin-auth` Fail2ban jail, and installs a helpful login banner (`/etc/update-motd.d/99-virtualmin-hosting`).
 
 > **Note:** `harden_server.sh` and `install_virtualmin.sh` can be run in either order—both detect existing SSH/Webmin ports and wire up `firewalld` and `fail2ban` automatically.

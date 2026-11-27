@@ -5,7 +5,8 @@ set -euo pipefail
 # - Installs Virtualmin minimal (--bundle LAMP|LEMP --type mini) with FQDN validation
 # - Installs Jailkit + webmin-jailkit with restrictive defaults and enables it on Default Settings
 # - Purges Usermin (no mail stack) and moves Webmin to a required custom non-10000 port
-# - Applies Virtualmin preferences (full-domain usernames, editable limits, 2 GB default quota)
+# - Applies Virtualmin preferences (full-domain usernames, editable limits, 2 GB default quota,
+#   and disables automatic webmail./admin. redirects that break Let's Encrypt)
 # - Configures firewalld, adds a Fail2ban webmin-auth jail drop-in if Fail2ban is present,
 #   and installs a login MOTD documenting the jailed-user admin workflow.
 
@@ -374,6 +375,14 @@ configure_webmin_and_virtualmin_defaults() {
     if ! virtualmin modify-plan --id 0 --quota "$quota_blocks" --admin-quota "$quota_blocks"; then
       colored_echo "$YELLOW" "Warning: Failed to update Default Plan quota via CLI; adjust it under Virtualmin > System Settings > Account Plans."
     fi
+
+    colored_echo "$BLUE" "Disabling automatic webmail. and admin. redirects on Default Settings template..."
+    local setting
+    for setting in web_webmail web_admin; do
+      if ! virtualmin modify-template --id 0 --setting "$setting" --value 0; then
+        colored_echo "$YELLOW" "Warning: Failed to disable ${setting} via 'virtualmin modify-template'; disable it under Virtualmin > System Settings > Server Templates > Default Settings > Website for domain."
+      fi
+    done
   fi
 
   if command -v systemctl >/dev/null 2>&1 && [[ -f "$miniserv_conf" ]]; then
@@ -583,7 +592,7 @@ main() {
     echo "  - Webmin port   : ${WEBMIN_PORT}/tcp (default 10000 closed)"
     echo "  - Jailkit       : restrictive default chroot, enabled on Default Settings"
     echo "  - Usermin       : purged if present"
-    echo "  - Defaults      : full-domain usernames, editable limits, ${QUOTA_GB} GB default quota"
+    echo "  - Defaults      : full-domain usernames, editable limits, ${QUOTA_GB} GB default quota, no webmail./admin. redirects"
     echo "  - Firewall      : firewalld (SSH ${ssh_port}/tcp, HTTP, HTTPS, Webmin ${WEBMIN_PORT}/tcp)"
     local confirm=""
     prompt_read "Proceed with Virtualmin installation and hardening? [y/N]: " confirm

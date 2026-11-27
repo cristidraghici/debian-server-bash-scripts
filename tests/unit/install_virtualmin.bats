@@ -166,6 +166,8 @@ fi
   grep -qF "unixname=1" "$FAKE_ROOT/etc/webmin/virtual-server/config"
   grep -qF "template_auto=0" "$FAKE_ROOT/etc/webmin/virtual-server/config"
   grep -qF "virtualmin modify-plan --id 0 --quota 2097152 --admin-quota 2097152" "$MOCK_LOG"
+  grep -qF "virtualmin modify-template --id 0 --setting web_webmail --value 0" "$MOCK_LOG"
+  grep -qF "virtualmin modify-template --id 0 --setting web_admin --value 0" "$MOCK_LOG"
   grep -qF "systemctl restart webmin" "$MOCK_LOG"
 
   # Firewalld keeps custom SSH port 2222, opens HTTP/HTTPS/20443, closes 10000
@@ -228,6 +230,8 @@ exit 0
   [ "$status" -eq 0 ]
   [[ "$output" == *"Manual fallback to enable Jailkit"* ]]
   [[ "$output" == *"Chroot jail new domain Unix users?"* ]]
+  [[ "$output" == *"Failed to disable web_webmail"* ]]
+  [[ "$output" == *"Failed to disable web_admin"* ]]
 }
 
 @test "install_virtualmin disables Virtualmin nftables, removes virtualmin-nftables.conf, and restores unattended-upgrades" {
