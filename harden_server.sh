@@ -6,7 +6,8 @@ set -euo pipefail
 # - Configures firewalld for the active SSH port (preserving existing Webmin/web rules)
 # - Installs and configures strict Fail2ban (backend=systemd, maxretry=3, bantime=24h, recidive)
 # - Applies low-RAM kernel sysctl (SYN cookies, nf_conntrack limits/timeouts, swappiness), journald caps,
-#   and masks systemd-ssh-generator (silencing Debian 13+ AF_VSOCK console warnings)
+#   ensures at least 4 GB total swap via /swapfile (configurable with --swap-size), and masks
+#   systemd-ssh-generator (silencing Debian 13+ AF_VSOCK console warnings)
 # - Installs and configures unattended-upgrades for daily security patches
 
 ROOT_DIR="${HARDEN_ROOT_DIR:-}"
@@ -16,6 +17,7 @@ ALLOW_PASSWORD_AUTH=false
 AUTO_REBOOT=false
 REBOOT_TIME="03:00"
 NOTIFY_EMAIL=""
+SWAP_SIZE="4G"
 SKIP_UPDATE=false
 ASSUME_YES=false
 IGNORE_IPS=()
@@ -47,6 +49,7 @@ Options:
       --auto-reboot          Enable automatic reboot in unattended-upgrades when required
       --reboot-time <HH:MM>  Automatic reboot time for unattended-upgrades (default: 03:00)
       --notify-email <addr>  Send unattended-upgrades notifications to this email address
+      --swap-size <size>     Ensure at least this much total swap via /swapfile, e.g. 4G, 2048M, or 0 to skip (default: 4G)
       --skip-update          Skip running 'apt-get update' before package installation
   -y, --yes                  Skip interactive prompts and use defaults for omitted options
   -h, --help                 Show this help message and exit
@@ -118,6 +121,11 @@ parse_args() {
         NOTIFY_EMAIL="$2"
         shift 2
         ;;
+      --swap-size)
+        [[ $# -ge 2 ]] || die "Option $1 requires a value."
+        SWAP_SIZE="$2"
+        shift 2
+        ;;
       --skip-update)
         SKIP_UPDATE=true
         shift
@@ -148,6 +156,23 @@ validate_port() {
   fi
 }
 
+parse_swap_size_mb() {
+  local raw="$1"
+  if [[ "$raw" =~ ^0([MmGg])?$ ]]; then
+    echo "0"
+    return 0
+  fi
+  if [[ "$raw" =~ ^([1-9][0-9]*)[Gg]$ ]]; then
+    echo $((BASH_REMATCH[1] * 1024))
+    return 0
+  fi
+  if [[ "$raw" =~ ^([1-9][0-9]*)[Mm]$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
 validate_inputs() {
   if [[ -n "$SSH_PORT" ]]; then
     validate_port "$SSH_PORT" "SSH port"
@@ -161,6 +186,10 @@ validate_inputs() {
     if [[ ! "$NOTIFY_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
       die "Invalid email address '${NOTIFY_EMAIL}'."
     fi
+  fi
+
+  if ! parse_swap_size_mb "$SWAP_SIZE" >/dev/null; then
+    die "Invalid --swap-size '${SWAP_SIZE}'. Expected size like 4G, 2048M, or 0 to disable."
   fi
 
   if [[ ${#IGNORE_IPS[@]} -gt 0 ]]; then
@@ -521,6 +550,94 @@ EOF
   fi
 }
 
+configure_swap() {
+  local target_mb
+  target_mb="$(parse_swap_size_mb "$SWAP_SIZE")"
+  if ((target_mb == 0)); then
+    colored_echo "$BLUE" "Swap configuration disabled (--swap-size ${SWAP_SIZE}); skipping."
+    return 0
+  fi
+
+  if ! command -v swapon >/dev/null 2>&1 || ! command -v mkswap >/dev/null 2>&1; then
+    colored_echo "$YELLOW" "Warning: swapon/mkswap not available; skipping swap configuration."
+    return 0
+  fi
+
+  local swapfile="${ROOT_DIR}/swapfile"
+  local fstab_file="${ROOT_DIR}/etc/fstab"
+  local target_bytes=$((target_mb * 1024 * 1024))
+  local total_active_bytes=0
+  local other_swap_bytes=0
+  local swapfile_active=false
+  local swap_name swap_bytes
+
+  while read -r swap_name swap_bytes; do
+    [[ -n "$swap_name" && "$swap_bytes" =~ ^[0-9]+$ ]] || continue
+    total_active_bytes=$((total_active_bytes + swap_bytes))
+    if [[ "$swap_name" == "/swapfile" || "$swap_name" == "$swapfile" ]]; then
+      swapfile_active=true
+    else
+      other_swap_bytes=$((other_swap_bytes + swap_bytes))
+    fi
+  done < <(swapon --show=NAME,SIZE --bytes --noheadings 2>/dev/null || true)
+
+  local total_active_mb=$((total_active_bytes / 1048576))
+  if ((total_active_bytes >= target_bytes)); then
+    colored_echo "$BLUE" "Active swap (${total_active_mb}M) already meets target (${target_mb}M); skipping swapfile changes."
+    return 0
+  fi
+
+  local needed_bytes=$((target_bytes - other_swap_bytes))
+  local needed_mb=$(((needed_bytes + 1048575) / 1048576))
+  local existing_file_mb=0
+  if [[ -f "$swapfile" ]]; then
+    local existing_bytes
+    existing_bytes="$(stat -c '%s' "$swapfile" 2>/dev/null || stat -f '%z' "$swapfile" 2>/dev/null || echo 0)"
+    if [[ "$existing_bytes" =~ ^[0-9]+$ ]]; then
+      existing_file_mb=$((existing_bytes / 1048576))
+    fi
+  fi
+
+  local check_dir="${ROOT_DIR:-/}"
+  local avail_kb
+  avail_kb="$(df -Pk "$check_dir" 2>/dev/null | awk 'NR == 2 { print $4 }' || true)"
+  if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+    local avail_mb=$((avail_kb / 1024))
+    if ((avail_mb + existing_file_mb < needed_mb + 512)); then
+      colored_echo "$YELLOW" "Warning: Insufficient free disk space (${avail_mb}M available) for ${needed_mb}M swapfile; skipping."
+      return 0
+    fi
+  fi
+
+  colored_echo "$BLUE" "Configuring ${needed_mb}M swapfile at ${swapfile} (target total swap: ${target_mb}M)..."
+
+  if [[ "$swapfile_active" == true ]] && command -v swapoff >/dev/null 2>&1; then
+    swapoff "$swapfile" || die "Failed to disable existing swapfile at ${swapfile}."
+  fi
+
+  rm -f "$swapfile"
+  if command -v fallocate >/dev/null 2>&1 && fallocate -l "${needed_mb}M" "$swapfile" 2>/dev/null; then
+    :
+  else
+    dd if=/dev/zero of="$swapfile" bs=1M count="$needed_mb" status=none
+  fi
+
+  chmod 600 "$swapfile"
+  mkswap "$swapfile" >/dev/null
+
+  if ! swapon "$swapfile" 2>/dev/null; then
+    rm -f "$swapfile"
+    colored_echo "$YELLOW" "Warning: Could not activate ${swapfile} (container or unsupported filesystem); skipping."
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$fstab_file")"
+  touch "$fstab_file"
+  if ! grep -Eq '^[[:space:]]*/swapfile[[:space:]]' "$fstab_file"; then
+    printf '/swapfile none swap sw 0 0\n' >>"$fstab_file"
+  fi
+}
+
 configure_sysctl() {
   local modules_dir="${ROOT_DIR}/etc/modules-load.d"
   local sysctl_dir="${ROOT_DIR}/etc/sysctl.d"
@@ -631,6 +748,7 @@ main() {
     echo "  - SSH port: ${CURRENT_SSH_PORT} -> ${SSH_PORT} (PermitRootLogin no)"
     echo "  - Firewall: firewalld (allow SSH ${SSH_PORT}/tcp)"
     echo "  - Fail2ban: systemd backend, maxretry=3, bantime=24h, sshd + recidive"
+    echo "  - Swap: ensure at least ${SWAP_SIZE} total swap via /swapfile"
     echo "  - Sysctl & journald: low-RAM nf_conntrack/SYN-flood tuning, 100M journal cap"
     echo "  - Unattended upgrades: daily security updates (auto-reboot=${AUTO_REBOOT})"
     local confirm=""
@@ -648,6 +766,7 @@ main() {
   configure_ssh
   configure_firewalld_post_ssh
   configure_fail2ban
+  configure_swap
   configure_sysctl
   configure_journald
   configure_unattended_upgrades

@@ -30,6 +30,19 @@ EOF
 
   create_mock apt-get 'echo "apt-get $*" >>"$MOCK_LOG"'
   create_mock firewall-cmd 'echo "firewall-cmd $*" >>"$MOCK_LOG"'
+  create_mock fallocate '
+echo "fallocate $*" >>"$MOCK_LOG"
+touch "${@: -1}"
+'
+  create_mock mkswap 'echo "mkswap $*" >>"$MOCK_LOG"'
+  create_mock swapon '
+echo "swapon $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == --show=* ]]; then
+  exit 0
+fi
+exit 0
+'
+  create_mock swapoff 'echo "swapoff $*" >>"$MOCK_LOG"'
   create_mock sshd '
 echo "sshd $*" >>"$MOCK_LOG"
 if [[ "${1:-}" == "-T" ]]; then
@@ -122,6 +135,12 @@ teardown() {
   # Unattended upgrades
   grep -qF 'APT::Periodic::Unattended-Upgrade "1";' "$FAKE_ROOT/etc/apt/apt.conf.d/20auto-upgrades"
   grep -qF 'Unattended-Upgrade::Automatic-Reboot "false";' "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
+
+  # Swapfile creation (default 4G)
+  grep -qF "fallocate -l 4096M $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "mkswap $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "swapon $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "/swapfile none swap sw 0 0" "$FAKE_ROOT/etc/fstab"
 
   # Low-RAM sysctl, nf_conntrack boot module, and journald caps
   grep -qF "nf_conntrack" "$FAKE_ROOT/etc/modules-load.d/99-nf_conntrack.conf"
@@ -259,4 +278,73 @@ exit 0
   [ -n "$reload_line" ]
   [ -n "$install_line" ]
   [ "$reload_line" -lt "$install_line" ]
+}
+
+@test "harden_server rejects invalid --swap-size values" {
+  run bash "$REPO_ROOT/harden_server.sh" --swap-size 4GB --skip-update -y
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid --swap-size"* ]]
+
+  run bash "$REPO_ROOT/harden_server.sh" --swap-size -2G --skip-update -y
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Invalid --swap-size"* ]]
+}
+
+@test "harden_server tops up existing swap partition to reach target swap size" {
+  create_mock swapon '
+echo "swapon $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == --show=* ]]; then
+  echo "/dev/vda2 1073741824"
+  exit 0
+fi
+exit 0
+'
+
+  run bash "$REPO_ROOT/harden_server.sh" --swap-size 4G --skip-update -y
+  [ "$status" -eq 0 ]
+  grep -qF "fallocate -l 3072M $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "mkswap $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "swapon $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "/swapfile none swap sw 0 0" "$FAKE_ROOT/etc/fstab"
+}
+
+@test "harden_server resizes existing smaller /swapfile and avoids duplicate fstab entries" {
+  printf '/swapfile none swap sw 0 0\n' >"$FAKE_ROOT/etc/fstab"
+  create_mock swapon '
+echo "swapon $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == --show=* ]]; then
+  echo "/swapfile 1073741824"
+  exit 0
+fi
+exit 0
+'
+
+  run bash "$REPO_ROOT/harden_server.sh" --swap-size 4G --skip-update -y
+  [ "$status" -eq 0 ]
+  grep -qF "swapoff $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "fallocate -l 4096M $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  grep -qF "swapon $FAKE_ROOT/swapfile" "$MOCK_LOG"
+  [ "$(grep -c '/swapfile' "$FAKE_ROOT/etc/fstab")" -eq 1 ]
+}
+
+@test "harden_server skips swapfile when active swap meets target or --swap-size is 0" {
+  create_mock swapon '
+echo "swapon $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == --show=* ]]; then
+  echo "/dev/vda2 4294967296"
+  exit 0
+fi
+exit 0
+'
+
+  run bash "$REPO_ROOT/harden_server.sh" --swap-size 4G --skip-update -y
+  [ "$status" -eq 0 ]
+  run ! grep -qF "fallocate" "$MOCK_LOG"
+  [ ! -f "$FAKE_ROOT/swapfile" ]
+
+  : >"$MOCK_LOG"
+  run bash "$REPO_ROOT/harden_server.sh" --swap-size 0 --skip-update -y
+  [ "$status" -eq 0 ]
+  run ! grep -qF "fallocate" "$MOCK_LOG"
+  run ! grep -qF "swapon" "$MOCK_LOG"
 }

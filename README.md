@@ -76,6 +76,7 @@ What this configures:
 - **OpenSSH** (`/etc/ssh/sshd_config.d/99-hardening.conf`, validated with `sshd -t`): `PermitRootLogin no`, disables password auth once non-root SSH keys exist, and moves SSH to your chosen port.
 - **Firewall (`firewalld`)**: opens the new SSH port and removes the previous one.
 - **Fail2ban**: strict `systemd` backend (`maxretry=3`, `bantime=24h`) with `sshd` and `recidive` jails.
+- **Swap & low-RAM tuning**: ensures at least `4G` total swap via `/swapfile` + `/etc/fstab` (configurable with `--swap-size`, `0` to skip), sets `vm.swappiness=10`, tunes `nf_conntrack`/SYN-flood sysctls, and caps `systemd-journald` to `100M`.
 - **Unattended upgrades**: daily Debian security patches.
 
 > **Tip:** Have a static admin IP? Whitelist it in Fail2ban with `... | sudo bash -s -- --ignore-ip 203.0.113.10`.
@@ -200,7 +201,7 @@ theme:twentytwentyfive
 | Script                                                 | Dependencies                          | Summary                                                                                                                                                                       |
 | :----------------------------------------------------- | :------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`add_sudoer_with_ssh.sh`](./add_sudoer_with_ssh.sh)   | `adduser`, `sudo`, `openssh-client`   | Creates a sudoer user, validates SSH public key(s) with `ssh-keygen`, and optionally locks `root` (`--lock-root`).                                                            |
-| [`harden_server.sh`](./harden_server.sh)               | `apt-get`, `sshd`                     | Hardens OpenSSH (drop-in + `sshd -t`), configures `firewalld`, strict `fail2ban` (`systemd` + `recidive`), and `unattended-upgrades`.                                         |
+| [`harden_server.sh`](./harden_server.sh)               | `apt-get`, `sshd`                     | Hardens OpenSSH (drop-in + `sshd -t`), configures `firewalld`, strict `fail2ban` (`systemd` + `recidive`), `4G` `/swapfile` top-up + low-RAM sysctl/journald tuning, and `unattended-upgrades`. |
 | [`install_virtualmin.sh`](./install_virtualmin.sh)     | `apt-get`, `curl`, `hostname`         | Installs Virtualmin minimal (`LAMP`/`LEMP`) with restrictive Jailkit, custom Webmin port, Usermin purge, `firewalld`, `fail2ban` handoff, and login MOTD.                     |
 | [`enable_php_extension.sh`](./enable_php_extension.sh) | `apt-get`, `php` (or `-v`)            | Installs & enables PHP extensions in one APT call and reloads active Apache or PHP-FPM/Nginx services.                                                                        |
 | [`update_php_hosts.sh`](./update_php_hosts.sh)         | `virtualmin`, `dpkg-query`, `apt-get` | Lists Virtualmin hosts and their PHP versions, confirms updating each host one by one to the latest (or `-v`) PHP version, reloads services, and removes unused PHP versions. |
