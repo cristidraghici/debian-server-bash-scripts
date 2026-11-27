@@ -40,7 +40,7 @@ Log in as `root` (or prefix with `sudo` if your provider starts you as a cloud u
 
 ```bash
 apt-get update && apt-get upgrade -y
-apt-get install -y sudo curl git unzip
+apt-get install -y sudo curl git unzip zsh
 ```
 
 > If a new kernel was installed, `reboot` and reconnect before continuing.
@@ -54,6 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/cristidraghici/debian-server-bash-s
 ```
 
 During the prompts:
+
 - Paste your SSH public key(s) and press `Ctrl-D` (keys are validated with `ssh-keygen`).
 - **Set a strong password** when prompted (do not use `--disabled-password`)—you will need it for `sudo` and for logging into Virtualmin/Webmin.
 - **Before answering `y` to lock `root`**, open a **second terminal** and verify SSH + `sudo` work as the new user:
@@ -71,6 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/cristidraghici/debian-server-bash-s
 ```
 
 What this configures:
+
 - **OpenSSH** (`/etc/ssh/sshd_config.d/99-hardening.conf`, validated with `sshd -t`): `PermitRootLogin no`, disables password auth once non-root SSH keys exist, and moves SSH to your chosen port.
 - **Firewall (`firewalld`)**: opens the new SSH port and removes the previous one.
 - **Fail2ban**: strict `systemd` backend (`maxretry=3`, `bantime=24h`) with `sshd` and `recidive` jails.
@@ -79,6 +81,7 @@ What this configures:
 > **Tip:** Have a static admin IP? Whitelist it in Fail2ban with `... | sudo bash -s -- --ignore-ip 203.0.113.10`.
 
 > **Important:** Before closing your current terminal, open a **new terminal** and verify SSH login on the new port:
+>
 > ```bash
 > ssh -p <ssh-port> <user>@<server-ip>
 > ```
@@ -94,6 +97,7 @@ curl -fsSL https://raw.githubusercontent.com/cristidraghici/debian-server-bash-s
 You will be prompted for your server FQDN (if not auto-detected) and a custom Webmin port (`1024–65535`, not `10000` or your SSH port—for example `20443`).
 
 What this configures:
+
 - **Virtualmin minimal (`LAMP`)**: Apache, MariaDB, PHP, and Webmin (pass `-s -- --bundle LEMP` if you prefer Nginx).
 - **Restrictive Jailkit**: installs `jailkit` + `webmin-jailkit` and enables chroot jailing on Virtualmin's **Default Settings** template.
 - **Hardened panel**: purges Usermin (no mail stack), moves Webmin to your custom port, closes `10000/tcp`, and sets full-domain usernames, editable limits, and a `2 GB` default quota.
@@ -193,25 +197,26 @@ theme:twentytwentyfive
 
 ### System Scripts (`sudo`)
 
-| Script | Dependencies | Summary |
-| :--- | :--- | :--- |
-| [`add_sudoer_with_ssh.sh`](./add_sudoer_with_ssh.sh) | `adduser`, `sudo`, `openssh-client` | Creates a sudoer user, validates SSH public key(s) with `ssh-keygen`, and optionally locks `root` (`--lock-root`). |
-| [`harden_server.sh`](./harden_server.sh) | `apt-get`, `sshd` | Hardens OpenSSH (drop-in + `sshd -t`), configures `firewalld`, strict `fail2ban` (`systemd` + `recidive`), and `unattended-upgrades`. |
-| [`install_virtualmin.sh`](./install_virtualmin.sh) | `apt-get`, `curl`, `hostname` | Installs Virtualmin minimal (`LAMP`/`LEMP`) with restrictive Jailkit, custom Webmin port, Usermin purge, `firewalld`, `fail2ban` handoff, and login MOTD. |
-| [`enable_php_extension.sh`](./enable_php_extension.sh) | `apt-get`, `php` (or `-v`) | Installs & enables PHP extensions in one APT call and reloads active Apache or PHP-FPM/Nginx services. |
-| [`update_php_hosts.sh`](./update_php_hosts.sh) | `virtualmin`, `dpkg-query`, `apt-get` | Lists Virtualmin hosts and their PHP versions, confirms updating each host one by one to the latest (or `-v`) PHP version, reloads services, and removes unused PHP versions. |
+| Script                                                 | Dependencies                          | Summary                                                                                                                                                                       |
+| :----------------------------------------------------- | :------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`add_sudoer_with_ssh.sh`](./add_sudoer_with_ssh.sh)   | `adduser`, `sudo`, `openssh-client`   | Creates a sudoer user, validates SSH public key(s) with `ssh-keygen`, and optionally locks `root` (`--lock-root`).                                                            |
+| [`harden_server.sh`](./harden_server.sh)               | `apt-get`, `sshd`                     | Hardens OpenSSH (drop-in + `sshd -t`), configures `firewalld`, strict `fail2ban` (`systemd` + `recidive`), and `unattended-upgrades`.                                         |
+| [`install_virtualmin.sh`](./install_virtualmin.sh)     | `apt-get`, `curl`, `hostname`         | Installs Virtualmin minimal (`LAMP`/`LEMP`) with restrictive Jailkit, custom Webmin port, Usermin purge, `firewalld`, `fail2ban` handoff, and login MOTD.                     |
+| [`enable_php_extension.sh`](./enable_php_extension.sh) | `apt-get`, `php` (or `-v`)            | Installs & enables PHP extensions in one APT call and reloads active Apache or PHP-FPM/Nginx services.                                                                        |
+| [`update_php_hosts.sh`](./update_php_hosts.sh)         | `virtualmin`, `dpkg-query`, `apt-get` | Lists Virtualmin hosts and their PHP versions, confirms updating each host one by one to the latest (or `-v`) PHP version, reloads services, and removes unused PHP versions. |
 
 ### User & Developer Scripts (regular user, `--root` opt-in)
 
-| Script | Dependencies | Summary |
-| :--- | :--- | :--- |
-| [`install_composer.sh`](./install_composer.sh) | `php`, `curl` | Downloads Composer, verifies its SHA-384 signature, and installs to `~/.local/bin/composer`. |
-| [`install_wp_cli.sh`](./install_wp_cli.sh) | `curl`, `php`, `sha512sum` | Downloads WP-CLI, verifies its SHA-512 checksum, and installs to `~/.local/bin/wp`. |
-| [`install_nvm.sh`](./install_nvm.sh) | `curl`, `git` | Installs the latest (or `--version`) NVM release and updates `~/.bashrc` and `~/.zshrc` idempotently. |
-| [`install_antigen.sh`](./install_antigen.sh) | `git`, `zsh`, `curl` | Installs Antigen from GitHub into `~/.antigen` and configures `~/.zshrc` idempotently. |
-| [`install_wp.sh`](./install_wp.sh) | `curl`, `unzip`, `mariadb-client` | Standalone WordPress installer with unpinned plugins/themes, fresh WP salts, safe `wp-config.php`, and Apache 2.4 `.htaccess`. |
+| Script                                         | Dependencies                      | Summary                                                                                                                        |
+| :--------------------------------------------- | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------- |
+| [`install_composer.sh`](./install_composer.sh) | `php`, `curl`                     | Downloads Composer, verifies its SHA-384 signature, and installs to `~/.local/bin/composer`.                                   |
+| [`install_wp_cli.sh`](./install_wp_cli.sh)     | `curl`, `php`, `sha512sum`        | Downloads WP-CLI, verifies its SHA-512 checksum, and installs to `~/.local/bin/wp`.                                            |
+| [`install_nvm.sh`](./install_nvm.sh)           | `curl`, `git`                     | Installs the latest (or `--version`) NVM release and updates `~/.bashrc` and `~/.zshrc` idempotently.                          |
+| [`install_antigen.sh`](./install_antigen.sh)   | `git`, `zsh`, `curl`              | Installs Antigen from GitHub into `~/.antigen` and configures `~/.zshrc` idempotently.                                         |
+| [`install_wp.sh`](./install_wp.sh)             | `curl`, `unzip`, `mariadb-client` | Standalone WordPress installer with unpinned plugins/themes, fresh WP salts, safe `wp-config.php`, and Apache 2.4 `.htaccess`. |
 
 **Conventions:**
+
 - **User binaries** default to `~/.local/bin` (override with `--install-dir`) and update `~/.bashrc` / `~/.zshrc` idempotently.
 - **Root safety**: user-scoped scripts refuse to run as `root` unless `--root` is passed explicitly.
 - **Help**: pass `--help` to any script to list all flags and examples.
