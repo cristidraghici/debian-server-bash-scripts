@@ -429,6 +429,23 @@ EOF
   fi
 }
 
+cleanup_conflicting_nftables_tables() {
+  if ! command -v nft >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local family="" name=""
+  while read -r _ family name; do
+    if [[ -z "$family" || -z "$name" ]]; then
+      continue
+    fi
+    if [[ ("$family" == "inet" && "$name" == "filter") || "$name" == webmin* ]]; then
+      colored_echo "$BLUE" "Removing conflicting nftables table '${family} ${name}' so firewalld is the sole firewall..."
+      nft delete table "$family" "$name" 2>/dev/null || true
+    fi
+  done < <(nft list tables 2>/dev/null || true)
+}
+
 configure_firewalld() {
   local ssh_port="$1"
   if ! command -v firewall-cmd >/dev/null 2>&1; then
@@ -464,6 +481,7 @@ configure_firewalld() {
   firewall-cmd --permanent --remove-service=webmin >/dev/null 2>&1 || true
 
   firewall-cmd --reload >/dev/null
+  cleanup_conflicting_nftables_tables
 }
 
 configure_fail2ban_handoff() {

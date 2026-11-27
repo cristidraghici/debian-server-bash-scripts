@@ -271,6 +271,23 @@ install_packages() {
     unattended-upgrades
 }
 
+cleanup_conflicting_nftables_tables() {
+  if ! command -v nft >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local family="" name=""
+  while read -r _ family name; do
+    if [[ -z "$family" || -z "$name" ]]; then
+      continue
+    fi
+    if [[ ("$family" == "inet" && "$name" == "filter") || "$name" == webmin* ]]; then
+      colored_echo "$BLUE" "Removing conflicting nftables table '${family} ${name}' so firewalld is the sole firewall..."
+      nft delete table "$family" "$name" 2>/dev/null || true
+    fi
+  done < <(nft list tables 2>/dev/null || true)
+}
+
 configure_firewalld_pre_ssh() {
   if ! command -v firewall-cmd >/dev/null 2>&1; then
     die "firewall-cmd is not available after installing firewalld."
@@ -303,6 +320,7 @@ configure_firewalld_pre_ssh() {
   fi
 
   firewall-cmd --reload >/dev/null
+  cleanup_conflicting_nftables_tables
 }
 
 configure_firewalld_post_ssh() {

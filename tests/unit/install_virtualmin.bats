@@ -232,6 +232,15 @@ exit 0
   touch "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf"
   mkdir -p "$FAKE_ROOT/etc/apt/apt.conf.d"
   touch "$FAKE_ROOT/etc/apt/apt.conf.d/51unattended-upgrades-local"
+  create_mock nft '
+echo "nft $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == "list" && "${2:-}" == "tables" ]]; then
+  echo "table inet filter"
+  echo "table inet webmin_profile_hosting"
+  echo "table inet firewalld"
+  echo "table ip filter"
+fi
+'
 
   run bash "$REPO_ROOT/install_virtualmin.sh" --skip-install --skip-update --webmin-port 20443 -y
   [ "$status" -eq 0 ]
@@ -239,6 +248,10 @@ exit 0
   grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
   grep -qF "systemctl enable --now firewalld" "$MOCK_LOG"
   grep -qF "systemctl restart firewalld" "$MOCK_LOG"
+  grep -qF "nft delete table inet filter" "$MOCK_LOG"
+  grep -qF "nft delete table inet webmin_profile_hosting" "$MOCK_LOG"
+  run ! grep -qF "nft delete table inet firewalld" "$MOCK_LOG"
+  run ! grep -qF "nft delete table ip filter" "$MOCK_LOG"
   grep -qF "systemctl enable --now unattended-upgrades" "$MOCK_LOG"
   [ ! -f "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf" ]
 }

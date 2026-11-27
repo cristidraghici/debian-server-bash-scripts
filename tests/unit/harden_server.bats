@@ -210,6 +210,15 @@ EOF
 
 @test "harden_server disables conflicting nftables.service and removes virtualmin-nftables.conf" {
   touch "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf"
+  create_mock nft '
+echo "nft $*" >>"$MOCK_LOG"
+if [[ "${1:-}" == "list" && "${2:-}" == "tables" ]]; then
+  echo "table inet filter"
+  echo "table inet webmin_profile_hosting"
+  echo "table inet firewalld"
+  echo "table ip filter"
+fi
+'
   create_mock systemctl '
 echo "systemctl $*" >>"$MOCK_LOG"
 if [[ "${1:-}" == "is-active" || "${1:-}" == "is-enabled" ]]; then
@@ -225,6 +234,10 @@ exit 0
   [ "$status" -eq 0 ]
   grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
   grep -qF "systemctl restart firewalld" "$MOCK_LOG"
+  grep -qF "nft delete table inet filter" "$MOCK_LOG"
+  grep -qF "nft delete table inet webmin_profile_hosting" "$MOCK_LOG"
+  run ! grep -qF "nft delete table inet firewalld" "$MOCK_LOG"
+  run ! grep -qF "nft delete table ip filter" "$MOCK_LOG"
   [ ! -f "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf" ]
   [ ! -e "$FAKE_ROOT/etc/systemd/system-generators/systemd-ssh-generator" ]
 }
