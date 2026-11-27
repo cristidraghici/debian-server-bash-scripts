@@ -5,7 +5,8 @@ set -euo pipefail
 # - Hardens OpenSSH via /etc/ssh/sshd_config.d/99-hardening.conf (validated with sshd -t)
 # - Configures firewalld for the active SSH port (preserving existing Webmin/web rules)
 # - Installs and configures strict Fail2ban (backend=systemd, maxretry=3, bantime=24h, recidive)
-# - Applies low-RAM kernel sysctl (SYN cookies, nf_conntrack limits/timeouts, swappiness) and journald caps
+# - Applies low-RAM kernel sysctl (SYN cookies, nf_conntrack limits/timeouts, swappiness), journald caps,
+#   and masks systemd-ssh-generator (silencing Debian 13+ AF_VSOCK console warnings)
 # - Installs and configures unattended-upgrades for daily security patches
 
 ROOT_DIR="${HARDEN_ROOT_DIR:-}"
@@ -559,6 +560,25 @@ EOF
   fi
 }
 
+mask_systemd_ssh_generator() {
+  if [[ ! -e "${ROOT_DIR}/usr/lib/systemd/system-generators/systemd-ssh-generator" && ! -e "${ROOT_DIR}/lib/systemd/system-generators/systemd-ssh-generator" ]]; then
+    return 0
+  fi
+
+  local mask_dir="${ROOT_DIR}/etc/systemd/system-generators"
+  local mask_path="${mask_dir}/systemd-ssh-generator"
+  if [[ -L "$mask_path" && "$(readlink "$mask_path")" == "/dev/null" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$mask_dir"
+  colored_echo "$BLUE" "Masking systemd-ssh-generator (${mask_path} -> /dev/null) to silence AF_VSOCK warnings..."
+  ln -sfn /dev/null "$mask_path"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+}
+
 main() {
   parse_args "$@"
 
@@ -604,6 +624,7 @@ main() {
 
   TMP_DIR="$(mktemp -d)"
 
+  mask_systemd_ssh_generator
   install_packages
   configure_firewalld_pre_ssh
   configure_ssh

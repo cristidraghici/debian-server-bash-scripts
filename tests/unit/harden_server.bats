@@ -226,4 +226,24 @@ exit 0
   grep -qF "systemctl disable --now nftables" "$MOCK_LOG"
   grep -qF "systemctl restart firewalld" "$MOCK_LOG"
   [ ! -f "$FAKE_ROOT/etc/fail2ban/jail.d/virtualmin-nftables.conf" ]
+  [ ! -e "$FAKE_ROOT/etc/systemd/system-generators/systemd-ssh-generator" ]
+}
+
+@test "harden_server masks systemd-ssh-generator when present on Debian 13+" {
+  mkdir -p "$FAKE_ROOT/usr/lib/systemd/system-generators"
+  touch "$FAKE_ROOT/usr/lib/systemd/system-generators/systemd-ssh-generator"
+
+  run bash "$REPO_ROOT/harden_server.sh" --skip-update -y
+  [ "$status" -eq 0 ]
+
+  local mask_path="$FAKE_ROOT/etc/systemd/system-generators/systemd-ssh-generator"
+  [ -L "$mask_path" ]
+  [ "$(readlink "$mask_path")" = "/dev/null" ]
+
+  local reload_line install_line
+  reload_line="$(grep -nF "systemctl daemon-reload" "$MOCK_LOG" | head -n1 | cut -d: -f1)"
+  install_line="$(grep -nF "apt-get install -y" "$MOCK_LOG" | head -n1 | cut -d: -f1)"
+  [ -n "$reload_line" ]
+  [ -n "$install_line" ]
+  [ "$reload_line" -lt "$install_line" ]
 }
