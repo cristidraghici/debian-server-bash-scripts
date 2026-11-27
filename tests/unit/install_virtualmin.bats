@@ -28,6 +28,7 @@ EOF
 
   cat >"$FAKE_ROOT/etc/webmin/virtual-server/config" <<'EOF'
 longname=0
+unixname=0
 template_auto=1
 EOF
 
@@ -138,7 +139,7 @@ if [[ -n "$out" ]]; then
 #!/bin/sh
 echo "virtualmin-install $*" >>"$MOCK_LOG"
 mkdir -p "$VIRTUALMIN_ROOT_DIR/etc/webmin/virtual-server"
-printf "longname=0\ntemplate_auto=1\n" >"$VIRTUALMIN_ROOT_DIR/etc/webmin/virtual-server/config"
+printf "longname=0\nunixname=0\ntemplate_auto=1\n" >"$VIRTUALMIN_ROOT_DIR/etc/webmin/virtual-server/config"
 SCRIPT
 fi
 '
@@ -162,6 +163,7 @@ fi
   grep -qF "port=20443" "$FAKE_ROOT/etc/webmin/miniserv.conf"
   grep -qF "listen=20443" "$FAKE_ROOT/etc/webmin/miniserv.conf"
   grep -qF "longname=1" "$FAKE_ROOT/etc/webmin/virtual-server/config"
+  grep -qF "unixname=1" "$FAKE_ROOT/etc/webmin/virtual-server/config"
   grep -qF "template_auto=0" "$FAKE_ROOT/etc/webmin/virtual-server/config"
   grep -qF "virtualmin modify-plan --id 0 --quota 2097152 --admin-quota 2097152" "$MOCK_LOG"
   grep -qF "systemctl restart webmin" "$MOCK_LOG"

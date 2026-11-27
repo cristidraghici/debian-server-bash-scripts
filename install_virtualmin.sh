@@ -360,6 +360,8 @@ configure_webmin_and_virtualmin_defaults() {
     colored_echo "$BLUE" "Applying Virtualmin defaults (full-domain usernames, allow editing limits on creation)..."
     # longname=1 => Full domain name style in usernames
     set_kv_setting "$vs_conf" "longname" "1"
+    # unixname=1 => Full domain name format for admin username
+    set_kv_setting "$vs_conf" "unixname" "1"
     # template_auto=0 => Allow editing of limits when creating a server = Yes
     set_kv_setting "$vs_conf" "template_auto" "0"
   else
