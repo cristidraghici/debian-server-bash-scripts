@@ -21,6 +21,7 @@ SCRIPTS=(
   install_virtualmin.sh
   install_wp_cli.sh
   install_wp.sh
+  update_php_hosts.sh
 )
 
 @test "all scripts support --help with exit 0" {
@@ -41,7 +42,7 @@ SCRIPTS=(
 
 @test "system scripts reject non-root execution with exit 1" {
   mock_uid 1000
-  for script in add_sudoer_with_ssh.sh enable_php_extension.sh harden_server.sh install_virtualmin.sh; do
+  for script in add_sudoer_with_ssh.sh enable_php_extension.sh harden_server.sh install_virtualmin.sh update_php_hosts.sh; do
     run bash "$REPO_ROOT/$script"
     [ "$status" -eq 1 ]
     [[ "$output" == *"must be run as root"* ]]

@@ -199,6 +199,7 @@ theme:twentytwentyfive
 | [`harden_server.sh`](./harden_server.sh) | `apt-get`, `sshd` | Hardens OpenSSH (drop-in + `sshd -t`), configures `firewalld`, strict `fail2ban` (`systemd` + `recidive`), and `unattended-upgrades`. |
 | [`install_virtualmin.sh`](./install_virtualmin.sh) | `apt-get`, `curl`, `hostname` | Installs Virtualmin minimal (`LAMP`/`LEMP`) with restrictive Jailkit, custom Webmin port, Usermin purge, `firewalld`, `fail2ban` handoff, and login MOTD. |
 | [`enable_php_extension.sh`](./enable_php_extension.sh) | `apt-get`, `php` (or `-v`) | Installs & enables PHP extensions in one APT call and reloads active Apache or PHP-FPM/Nginx services. |
+| [`update_php_hosts.sh`](./update_php_hosts.sh) | `virtualmin`, `dpkg-query`, `apt-get` | Lists Virtualmin hosts and their PHP versions, confirms updating each host one by one to the latest (or `-v`) PHP version, reloads services, and removes unused PHP versions. |
 
 ### User & Developer Scripts (regular user, `--root` opt-in)
 
@@ -231,6 +232,9 @@ sudo ./install_virtualmin.sh --hostname panel.example.com --webmin-port 20443 -y
 # Enable extensions for PHP 8.4 and reload active Apache or PHP-FPM/Nginx
 sudo ./enable_php_extension.sh -v 8.4 curl gd mbstring intl zip
 
+# Update all Virtualmin hosts to the latest installed PHP version and purge unused PHP versions
+sudo ./update_php_hosts.sh -y
+
 # Install WordPress unattended (pass DB password via env var to keep it out of shell history)
 WP_DB_PASS='your-strong-password' ./install_wp.sh \
   --db-host localhost \
@@ -250,7 +254,7 @@ Install all scripts as local commands without `.sh` extensions:
 ```bash
 BASE_URL="https://raw.githubusercontent.com/cristidraghici/debian-server-bash-scripts/master"
 for script in \
-  add_sudoer_with_ssh enable_php_extension harden_server install_virtualmin \
+  add_sudoer_with_ssh enable_php_extension harden_server install_virtualmin update_php_hosts \
   install_antigen install_composer install_nvm install_wp_cli install_wp; do
   sudo curl -fsSL -o "/usr/local/bin/${script}" "${BASE_URL}/${script}.sh"
   sudo chmod +x "/usr/local/bin/${script}"
